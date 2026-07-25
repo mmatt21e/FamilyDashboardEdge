@@ -2,22 +2,28 @@
  * Settings: module toggles, appearance, account, and the shareable setup link.
  */
 
-import { el, toast, getTheme, applyTheme } from '../ui.js';
+import { el, toast, getTheme, applyTheme, children } from '../ui.js';
 import { groupedModules } from '../modules.js';
 import { state, setModuleEnabled } from '../store.js';
 import { shareSetupCard, resetConfigButton } from './setup.js';
 import * as fb from '../firebase.js';
 import { notificationsCard } from './notifications-card.js';
+import { inviteCard } from './invite.js';
+import { installCard } from './install-card.js';
 
 export async function settingsView() {
   return el('div', { class: 'view' },
     el('header', { class: 'view__header' }, el('h1', {}, 'Settings')),
-    appearanceCard(),
-    await notificationsCard(),
-    modulesCard(),
-    photoTagsCard(),
-    shareSetupCard(state.config),
-    accountCard(),
+    ...children(
+      installCard(),
+      appearanceCard(),
+      await notificationsCard(),
+      modulesCard(),
+      photoTagsCard(),
+      await inviteCard(),
+      shareSetupCard(state.config),
+      accountCard(),
+    ),
   );
 }
 

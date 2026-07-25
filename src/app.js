@@ -23,6 +23,11 @@ import { photosView, memoriesView } from './views/photos.js';
 import { feedView, calendarView } from './views/feed.js';
 import { onboardingView } from './views/onboarding.js';
 import { importTagsView, primeCatalog } from './views/import-tags.js';
+import {
+  installView, notAMemberView, wantsInstallStep,
+  rememberInvite, recallInvite, forgetInvite, arrivedFromLink,
+} from './views/invite.js';
+import { parseInviteCode, checkInvitation } from './invites.js';
 
 const root = document.getElementById('app');
 
@@ -76,9 +81,15 @@ async function boot() {
   applyTheme();
   watchSystemTheme();
 
+  // An invitation code has to outlive the URL: signing in with Google is a full
+  // page redirect on a home-screen app, and the hash does not come back with
+  // us. It is read before the URL is cleaned and kept for the session.
+  const code = parseInviteCode(location.hash);
+  const fromLink = readSetupLink();
+  if (code || fromLink) rememberInvite(code);
+
   // A setup link configures this device and then removes itself from the URL,
   // so the payload is not left sitting in history or shared on by accident.
-  const fromLink = readSetupLink();
   if (fromLink) {
     try {
       saveConfig(fromLink);
@@ -96,6 +107,21 @@ async function boot() {
   const config = loadConfig();
   update({ config });
 
+  // The install step, for someone who arrived by following an invitation on a
+  // phone. Desktops skip it - a computer should just open the dashboard and ask
+  // them to sign in, which is what happens next. It is never a dead end: the
+  // screen always offers to carry on in the browser.
+  if (arrivedFromLink() && wantsInstallStep()) {
+    return screen(installView({
+      familyName: config.familyName,
+      onContinue: () => { void continueBoot(config); },
+    }));
+  }
+
+  return continueBoot(config);
+}
+
+async function continueBoot(config) {
   screen(el('div', { class: 'view' }, spinner('Starting…')));
   armWatchdog(config);
 
@@ -129,19 +155,19 @@ async function boot() {
     try {
       const member = await fb.upsertMember(user);
       update({ member });
+      forgetInvite();
     } catch {
-      // Firestore rules will reject anyone not on the family allowlist. Say so
-      // plainly rather than showing a broken app behind a generic error.
-      disarmWatchdog();
-      return screen(el('div', { class: 'view' },
-        el('h1', {}, 'Not on the family list'),
-        el('p', { class: 'muted' },
-          `You are signed in as ${user.email}, but that account has not been added to this family yet.`),
-        el('p', { class: 'muted small' },
-          'Whoever set the dashboard up can add you — see the README for how.'),
-        el('button', { class: 'btn', onClick: async () => { await fb.signOutUser(); location.reload(); } },
-          'Sign in with a different account'),
-      ));
+      // Not on the allowlist. That is the normal state for somebody opening an
+      // invitation for the first time, so redeem it before giving up.
+      const outcome = await redeemInvite(user);
+      if (!outcome.ok) {
+        disarmWatchdog();
+        return screen(notAMemberView({
+          user, message: outcome.message, onJoined: () => location.reload(),
+        }));
+      }
+      update({ member: outcome.member });
+      forgetInvite();
     }
 
     await loadModuleSettings();
@@ -151,6 +177,33 @@ async function boot() {
     void primeCatalog();
     startApp();
   });
+}
+
+/**
+ * Turns an invitation into membership.
+ *
+ * The invitation is checked here before writing, so the reason it failed can be
+ * said out loud - "that one was for a different email address" is a fixable
+ * problem, and a bare permission error is not.
+ *
+ * @returns {Promise<{ok: boolean, member?: object, message?: string}>}
+ */
+async function redeemInvite(user) {
+  const code = recallInvite();
+  if (!code) return { ok: false, message: null };
+
+  const invitation = await fb.getInvitation(code);
+  const verdict = checkInvitation(invitation, { email: user.email });
+  if (!verdict.ok) return { ok: false, message: verdict.message };
+
+  try {
+    return { ok: true, member: await fb.joinWithInvite(user, code) };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error?.message ?? 'That invitation could not be used. Ask for a new one.',
+    };
+  }
 }
 
 let started = false;

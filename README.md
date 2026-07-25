@@ -18,6 +18,8 @@ and it never handles anyone else's data.
 | **Photos** — everything in the shared Drive folder | Working |
 | **Filter photos** by who is in them, year, month, event, folder or text | Working |
 | **Tag and correct photos by hand** — people, event, date | Working |
+| **Invite people from inside the app** | Working |
+| One-tap install on Android; guided Add to Home Screen on iPhone | Working (see below) |
 | **Memories** — on this day, a year / four years / ten years ago | Working |
 | **Calendar** — visits, trips, when everyone is together | Working |
 | **Message board** — short updates and photos | Working |
@@ -88,7 +90,8 @@ Document ID: <your uid, shown in Authentication → Users>
 Field:       email  (string)  your@email.com
 ```
 
-Reload. Everyone after you is added automatically when they first sign in.
+Reload. That is the only time anyone touches the console — everyone after you
+gets in on an invitation you send from Settings.
 
 ### 6. Fill in the Setup screen
 
@@ -96,11 +99,48 @@ Open the app, paste the `firebaseConfig` block, the Google client ID
 (Authentication → Sign-in method → Google → Web SDK configuration) and the Drive
 folder ID.
 
-### 7. Send everyone else the link
+### 7. Invite everyone else
 
-Settings → **Set up everyone else** → Copy link. Anyone who opens that link on
-their phone gets the whole configuration filled in for them. Send it in the
-family chat, not anywhere public.
+Settings → **Invite someone**. Give their name and, ideally, the email address
+of the Google account they will sign in with, then press **Send it** — the phone
+share sheet puts the message straight into your family chat.
+
+The link does three things when they open it: fills in all the settings, walks
+them through adding the app to their home screen, and lets them sign in with
+their own Google account. Nobody has to touch the Firebase console.
+
+**Bind the invitation to an email address whenever you can.** With one set, only
+that Google account can use the invitation, so a forwarded link is worthless to
+anyone else. Leave it blank and anyone holding the link can join, once.
+
+Invitations last 14 days, are single-use, and can be cancelled from the same
+screen. Settings → **Set up everyone else** still copies a plain settings link
+with no invitation attached, for a second device belonging to someone already in
+the family.
+
+---
+
+## About installing to the home screen
+
+Worth being straight about, because it is the one thing that cannot work the way
+it sounds like it should: **a link cannot install a web app.** There is no URL
+or scheme on iOS or Android that installs a PWA. Tapping a link opens a browser.
+That is all a link is able to do on either platform.
+
+What the invitation link actually does is land on a screen that gets as close as
+each platform allows:
+
+| Where it opens | What happens |
+|---|---|
+| **Android, Chrome** | A real one-tap **Add to home screen** button. Chrome hands the page an install event and the app fires the genuine system dialog. |
+| **iPhone / iPad, Safari** | Two named taps: Share → Add to Home Screen. iOS has never had an install API and there is no substitute for doing it by hand. |
+| **Inside another app's browser** (Gmail, Messages, Facebook, Instagram) | "Open this in Safari/Chrome first", plus a copy-link button. Those built-in browsers usually have no Add to Home Screen at all — this is the failure that actually happens, because an invitation arrives *inside* one of those apps. |
+| **Desktop** | Skipped entirely. It goes straight to the dashboard and asks them to sign in. |
+
+Every version of the screen offers **Carry on in the browser**, and the choice
+sticks. The dashboard works perfectly well in a tab, and trapping someone behind
+an install step they cannot complete would be worse than not asking. Settings
+keeps the same offer for whenever they change their mind.
 
 ---
 
@@ -236,6 +276,8 @@ src/
   memories.js         "on this day" date logic
   files.js            Drive metadata → pointer records
   catalog.js          face-tag CSVs → who is in each photo
+  invites.js          invitation codes, links and expiry
+  install.js          which device this is, and how it can install
   catalog-store.js    where those tags live in Firestore
   photo-edits.js      corrections made by hand, which an import never undoes
   photo-filter.js     the photo filter bar's logic

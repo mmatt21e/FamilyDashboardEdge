@@ -217,7 +217,7 @@ export function serverTimestamp() {
  * document, so the first person in has to be added to Firestore by hand (see
  * README). After that everyone else is added here on first sign-in.
  */
-export async function upsertMember(user) {
+export async function upsertMember(user, { inviteCode = null } = {}) {
   if (!user) return null;
   const member = {
     uid: user.uid,
@@ -226,6 +226,47 @@ export async function upsertMember(user) {
     photoURL: user.photoURL ?? null,
     lastSeenAt: new Date().toISOString(),
   };
+  // The rules require this on a first write by someone not already in the
+  // family - it is the code they are being let in on.
+  if (inviteCode) member.inviteCode = inviteCode;
+
   await setDoc('members', user.uid, member);
   return member;
+}
+
+/**
+ * Joins the family using an invitation.
+ *
+ * The order is the whole point. The member document is written **first**, and
+ * the invitation is only stamped as used once that has actually succeeded. An
+ * earlier design marked the invitation the moment somebody opened the link,
+ * which meant anyone who saw a forwarded copy could spend it and lock out the
+ * person it was meant for.
+ *
+ * Failing to stamp it is deliberately not an error: membership is what matters,
+ * and a live invitation that has already been used is a far smaller problem
+ * than a member who cannot get in.
+ */
+export async function joinWithInvite(user, code) {
+  const member = await upsertMember(user, { inviteCode: code });
+
+  try {
+    await setDoc('invitations', code, {
+      usedBy: user.uid,
+      usedAt: new Date().toISOString(),
+    });
+  } catch {
+    // Already spent, or the rules refused the stamp. They are in either way.
+  }
+  return member;
+}
+
+/** Reads one invitation. Signed-in non-members may do this; listing is family only. */
+export async function getInvitation(code) {
+  if (!code) return null;
+  try {
+    return await getDoc('invitations', code);
+  } catch {
+    return null;
+  }
 }

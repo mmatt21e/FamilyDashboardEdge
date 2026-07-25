@@ -30,18 +30,68 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/members/$(request.auth.uid));
     }
 
+    // An invitation that is real, still live, and meant for whoever is holding
+    // it. This is the ONLY route into the family that does not already require
+    // being in it, so every condition here is load-bearing:
+    //
+    //   revoked / usedBy   - cancelled and spent invitations are dead
+    //   expiresAt          - epoch millis, so it can be compared to request.time
+    //   email              - when set, only that Google account may use it, so a
+    //                        forwarded link is worthless to anybody else
+    function validInvite(code) {
+      return code is string
+        && exists(/databases/$(database)/documents/invitations/$(code))
+        && inviteData(code).revoked != true
+        && inviteData(code).usedBy == null
+        && inviteData(code).expiresAt is number
+        && request.time.toMillis() < inviteData(code).expiresAt
+        && (inviteData(code).email == null
+            || inviteData(code).email == request.auth.token.email);
+    }
+
+    function inviteData(code) {
+      return get(/databases/$(database)/documents/invitations/$(code)).data;
+    }
+
     // --- members ------------------------------------------------------------
     match /members/{uid} {
       allow read: if isFamily();
 
-      // You may create or update only your OWN member document, and only once
-      // an existing member has added you. This is what stops a stranger who
-      // finds the app from signing in with Google and writing themselves in.
-      allow create, update: if isFamily() && request.auth.uid == uid;
+      // You may only ever write your OWN member document, and only if you were
+      // let in: either you are already family, or you are holding a valid
+      // invitation whose code you name in the document you are creating.
+      // Without one of those, a stranger who finds the app can sign in with
+      // Google and write themselves onto the allowlist.
+      allow create: if signedIn() && request.auth.uid == uid
+        && (isFamily() || validInvite(request.resource.data.inviteCode));
+
+      allow update: if isFamily() && request.auth.uid == uid;
 
       // Removing someone is a deliberate act done in the console, not from the
       // app, so nobody can lock the rest of the family out by accident.
       allow delete: if false;
+    }
+
+    // --- invitations --------------------------------------------------------
+    match /invitations/{code} {
+      // A single invitation can be read by anyone signed in, because knowing
+      // the code already implies having been sent it. Listing them is family
+      // only - otherwise any Google account could enumerate every outstanding
+      // invitation and the email addresses attached to them.
+      allow get: if isFamily() || signedIn();
+      allow list: if isFamily();
+
+      allow create, delete: if isFamily();
+
+      // Family members may cancel an invitation. The person joining may only
+      // stamp it as used, and only if it is not used already - so a forwarded
+      // copy cannot be burned by a bystander to lock out the genuine invitee.
+      allow update: if isFamily()
+        || (signedIn()
+            && resource.data.usedBy == null
+            && request.resource.data.usedBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['usedBy', 'usedAt']));
     }
 
     // --- module toggles -----------------------------------------------------

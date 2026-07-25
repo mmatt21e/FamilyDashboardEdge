@@ -27,6 +27,11 @@ import {
   applyEdits, buildEdit, isEmptyEdit, editedFields, normalisePersonName,
   addPerson, removePerson, toDateInput, toTimeInput, fromDateInput, parseEventInput,
 } from '../src/photo-edits.js';
+import {
+  generateCode, looksLikeEmail, buildInvitation, checkInvitation, describeInvitation,
+  toInviteLink, parseInviteCode, inviteMessage,
+} from '../src/invites.js';
+import { detectPlatform, installGuidance, shouldOfferInstall, OS } from '../src/install.js';
 
 const validConfig = {
   familyName: 'The Smiths',
@@ -1222,5 +1227,292 @@ describe('typing an event in', () => {
     assert.equal(parseEventInput(''), null);
     assert.equal(parseEventInput('  /  '), null);
     assert.equal(parseEventInput('!!!'), null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Invitations
+// ---------------------------------------------------------------------------
+
+describe('invitation codes', () => {
+  // This string is the only thing between a stranger and the family's photos.
+  test('comes from the cryptographic source, not Math.random', () => {
+    const bytes = [];
+    generateCode((n) => {
+      const out = crypto.getRandomValues(new Uint8Array(n));
+      bytes.push(n);
+      return out;
+    });
+    assert.ok(bytes.length > 0, 'the injected source must actually be used');
+  });
+
+  test('is long, and avoids characters people misread', () => {
+    const code = generateCode();
+    assert.equal(code.length, 20);
+    assert.match(code, /^[a-hj-km-np-z2-9]+$/, 'no 0/O/1/l/i to mistype');
+  });
+
+  test('does not repeat', () => {
+    const seen = new Set(Array.from({ length: 500 }, () => generateCode()));
+    assert.equal(seen.size, 500);
+  });
+
+  // A byte modulo a 31-letter alphabet would make the first few letters more
+  // likely than the rest; the sampler rejects the tail instead.
+  test('spreads evenly across the alphabet', () => {
+    const counts = new Map();
+    for (let i = 0; i < 400; i += 1) {
+      for (const ch of generateCode()) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+    }
+    const values = [...counts.values()];
+    assert.equal(counts.size, 31, 'every letter should turn up');
+    assert.ok(Math.max(...values) / Math.min(...values) < 2, 'distribution is lopsided');
+  });
+});
+
+describe('building an invitation', () => {
+  const now = Date.UTC(2026, 0, 1);
+
+  test('an address binds the invitation to that account', () => {
+    const invitation = buildInvitation({ code: 'abc', email: '  Someone@Example.COM ', now });
+    assert.equal(invitation.email, 'someone@example.com');
+  });
+
+  // The rules check `email == null` to decide whether an invitation is bound,
+  // and an empty string is not null.
+  test('no address is stored as null, never as an empty string', () => {
+    assert.equal(buildInvitation({ code: 'abc', email: '', now }).email, null);
+    assert.equal(buildInvitation({ code: 'abc', now }).email, null);
+  });
+
+  // Epoch millis rather than an ISO string, because a security rule cannot
+  // parse a string into a timestamp to compare against request.time.
+  test('the expiry is a number the security rules can compare', () => {
+    const invitation = buildInvitation({ code: 'abc', now });
+    assert.equal(typeof invitation.expiresAt, 'number');
+    assert.equal(invitation.expiresAt, now + 14 * 86_400_000);
+  });
+
+  test('refuses something that is not an address', () => {
+    assert.throws(() => buildInvitation({ code: 'abc', email: 'not an email' }));
+  });
+
+  test('starts unused and uncancelled', () => {
+    const invitation = buildInvitation({ code: 'abc', now });
+    assert.equal(invitation.usedBy, null);
+    assert.equal(invitation.revoked, false);
+  });
+});
+
+describe('checking an invitation', () => {
+  const now = Date.UTC(2026, 0, 1);
+  const live = buildInvitation({ code: 'abc', email: 'her@example.com', now });
+
+  test('accepts the account it was sent to', () => {
+    assert.equal(checkInvitation(live, { email: 'her@example.com', now: now + 1000 }).ok, true);
+  });
+
+  test('matches the address whatever case it was typed in', () => {
+    assert.equal(checkInvitation(live, { email: 'HER@Example.com', now: now + 1000 }).ok, true);
+  });
+
+  // The reason a bound invitation exists: a forwarded link is worthless.
+  test('refuses a different account, and says which one it wants', () => {
+    const verdict = checkInvitation(live, { email: 'him@example.com', now: now + 1000 });
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.reason, 'wrong-account');
+    assert.match(verdict.message, /her@example\.com/);
+  });
+
+  test('an unbound invitation takes anyone', () => {
+    const open = buildInvitation({ code: 'abc', now });
+    assert.equal(checkInvitation(open, { email: 'anyone@example.com', now: now + 1000 }).ok, true);
+  });
+
+  test('refuses expired, used, cancelled and missing ones', () => {
+    assert.equal(checkInvitation(live, { email: 'her@example.com', now: now + 15 * 86_400_000 }).reason, 'expired');
+    assert.equal(checkInvitation({ ...live, usedBy: 'someone' }, { email: 'her@example.com', now }).reason, 'used');
+    assert.equal(checkInvitation({ ...live, revoked: true }, { email: 'her@example.com', now }).reason, 'revoked');
+    assert.equal(checkInvitation(null, { now }).reason, 'unknown');
+  });
+
+  test('every refusal says something a person can act on', () => {
+    for (const invitation of [null, { ...live, revoked: true }, { ...live, usedBy: 'x' }]) {
+      const verdict = checkInvitation(invitation, { email: 'her@example.com', now });
+      assert.ok(verdict.message.length > 20, `unhelpful message: ${verdict.message}`);
+    }
+  });
+});
+
+describe('invitation status', () => {
+  const now = Date.UTC(2026, 0, 1);
+
+  test('reads the way a person would say it', () => {
+    const invitation = buildInvitation({ code: 'abc', now });
+    assert.equal(describeInvitation(invitation, now).label, '14 days left');
+    assert.equal(describeInvitation(invitation, now + 13.5 * 86_400_000).label, 'Expires today');
+    assert.equal(describeInvitation({ ...invitation, usedBy: 'x' }, now).label, 'Joined');
+    assert.equal(describeInvitation({ ...invitation, revoked: true }, now).label, 'Cancelled');
+    assert.equal(describeInvitation(invitation, now + 20 * 86_400_000).label, 'Expired');
+  });
+});
+
+describe('invitation links', () => {
+  const cfg = {
+    familyName: 'The Smiths',
+    firebase: { apiKey: 'k', authDomain: 'x.firebaseapp.com', projectId: 'p', appId: 'a' },
+    googleClientId: '123.apps.googleusercontent.com',
+    driveFolderId: 'folder123',
+  };
+
+  test('carries both the settings and the code', async () => {
+    const { toSetupLink, parseSetupCode } = await import('../src/config.js');
+    const link = toInviteLink(toSetupLink(cfg, 'https://example.com/app/'), 'abcd1234');
+
+    assert.equal(parseInviteCode(link), 'abcd1234');
+    assert.equal(parseSetupCode(link)?.firebase.projectId, 'p', 'the settings must still parse');
+  });
+
+  // An expired invitation should still configure the device, so the recipient
+  // can ask for a new code instead of being sent to the Firebase console.
+  test('the settings survive even if the invitation part is junk', async () => {
+    const { toSetupLink, parseSetupCode } = await import('../src/config.js');
+    const link = `${toSetupLink(cfg, 'https://example.com/app/')}&invite=`;
+    assert.equal(parseSetupCode(link)?.firebase.projectId, 'p');
+  });
+
+  test('reads a code from a bare fragment as well as a whole link', () => {
+    assert.equal(parseInviteCode('#setup=xyz&invite=abcd1234'), 'abcd1234');
+    assert.equal(parseInviteCode('?invite=abcd1234'), 'abcd1234');
+  });
+
+  test('finds no code where there is none', () => {
+    for (const junk of ['', 'https://example.com/', '#setup=xyz', null, undefined]) {
+      assert.equal(parseInviteCode(junk), null);
+    }
+  });
+
+  test('a link with no code is left alone', () => {
+    assert.equal(toInviteLink('https://example.com/#setup=x', null), 'https://example.com/#setup=x');
+  });
+
+  test('the message puts the link on its own line so apps make it tappable', () => {
+    const message = inviteMessage({ familyName: 'the Smiths', fromName: 'Matt', link: 'https://x.example/#setup=a&invite=b' });
+    assert.ok(message.includes('\nhttps://x.example/#setup=a&invite=b\n'));
+    assert.match(message, /Matt/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Which device is this, and can it install
+// ---------------------------------------------------------------------------
+
+const UA = {
+  iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  ipad: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+  iosChrome: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/126.0 Mobile/15E148 Safari/604.1',
+  facebook: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 [FBAN/FBIOS;FBAV/468.0.0.35.107]',
+  instagram: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 328.0.3.28.90',
+  androidChrome: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+  androidWebView: 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.0.0 Mobile Safari/537.36',
+  windows: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15',
+};
+
+describe('working out which device this is', () => {
+  test('an iPhone is an iPhone', () => {
+    assert.equal(detectPlatform({ ua: UA.iphone, maxTouchPoints: 5, platform: 'iPhone' }).os, OS.IOS);
+  });
+
+  // iPadOS has reported itself as a Mac since iPadOS 13. Getting this wrong
+  // sends an iPad down the desktop path, where none of the advice applies.
+  test('an iPad calling itself a Mac is still iOS', () => {
+    const ipad = detectPlatform({ ua: UA.ipad, maxTouchPoints: 5, platform: 'MacIntel' });
+    assert.equal(ipad.os, OS.IOS);
+  });
+
+  test('a real Mac with the same user agent is not', () => {
+    const mac = detectPlatform({ ua: UA.macSafari, maxTouchPoints: 0, platform: 'MacIntel' });
+    assert.equal(mac.os, OS.DESKTOP);
+  });
+
+  test('Android and desktop are told apart', () => {
+    assert.equal(detectPlatform({ ua: UA.androidChrome, maxTouchPoints: 5, platform: 'Linux armv8l' }).os, OS.ANDROID);
+    assert.equal(detectPlatform({ ua: UA.windows, maxTouchPoints: 0, platform: 'Win32' }).os, OS.DESKTOP);
+  });
+
+  // The failure that actually bites: an invitation arrives in a messaging app,
+  // whose browser has no "add to home screen" at all.
+  test('spots the browsers built into other apps', () => {
+    assert.equal(detectPlatform({ ua: UA.facebook, maxTouchPoints: 5, platform: 'iPhone' }).inApp, true);
+    assert.equal(detectPlatform({ ua: UA.instagram, maxTouchPoints: 5, platform: 'iPhone' }).inApp, true);
+    assert.equal(detectPlatform({ ua: UA.androidWebView, maxTouchPoints: 5, platform: 'Linux armv8l' }).inApp, true);
+  });
+
+  test('and does not mistake a real browser for one', () => {
+    assert.equal(detectPlatform({ ua: UA.iphone, maxTouchPoints: 5, platform: 'iPhone' }).inApp, false);
+    assert.equal(detectPlatform({ ua: UA.iosChrome, maxTouchPoints: 5, platform: 'iPhone' }).inApp, false);
+    assert.equal(detectPlatform({ ua: UA.androidChrome, maxTouchPoints: 5, platform: 'Linux armv8l' }).inApp, false);
+  });
+
+  test('Android Chrome is not Safari, and iOS Safari is not Chromium', () => {
+    assert.equal(detectPlatform({ ua: UA.androidChrome, platform: 'Linux armv8l' }).isSafari, false);
+    assert.equal(detectPlatform({ ua: UA.iphone, maxTouchPoints: 5, platform: 'iPhone' }).isChromium, false);
+  });
+});
+
+describe('what to tell someone about installing', () => {
+  const probeFor = (ua, extra = {}) => ({ ua, maxTouchPoints: 5, platform: 'iPhone', ...extra });
+
+  // No API for this has ever existed on iOS, so the only honest answer is the
+  // two taps, named exactly.
+  test('iPhone gets the Share sheet steps, never a fake install button', () => {
+    const guidance = installGuidance({ probe: probeFor(UA.iphone), canPrompt: false });
+    assert.equal(guidance.mode, 'manual');
+    assert.equal(guidance.steps.length, 2);
+    assert.match(guidance.steps.join(' '), /Share/);
+    assert.match(guidance.steps.join(' '), /Add to Home Screen/);
+  });
+
+  test('Android with a captured prompt gets the real one-tap button', () => {
+    const guidance = installGuidance({
+      probe: probeFor(UA.androidChrome, { platform: 'Linux armv8l' }), canPrompt: true,
+    });
+    assert.equal(guidance.mode, 'prompt');
+    assert.equal(guidance.steps.length, 0);
+  });
+
+  test('Android without one falls back to the menu rather than a dead button', () => {
+    const guidance = installGuidance({
+      probe: probeFor(UA.androidChrome, { platform: 'Linux armv8l' }), canPrompt: false,
+    });
+    assert.equal(guidance.mode, 'manual');
+    assert.ok(guidance.steps.length > 0);
+  });
+
+  test('inside another app it says get out of here first, and offers the link', () => {
+    const guidance = installGuidance({ probe: probeFor(UA.facebook), canPrompt: false });
+    assert.equal(guidance.mode, 'escape');
+    assert.equal(guidance.copyLink, true);
+    assert.match(guidance.steps.join(' '), /Safari/);
+  });
+
+  test('the Android version of that says Chrome, not Safari', () => {
+    const guidance = installGuidance({
+      probe: probeFor(UA.androidWebView, { platform: 'Linux armv8l' }), canPrompt: false,
+    });
+    assert.equal(guidance.mode, 'escape');
+    assert.match(guidance.steps.join(' '), /Chrome/);
+  });
+
+  // A computer should just open the dashboard and ask them to sign in.
+  test('a desktop is never asked to install anything', () => {
+    assert.equal(installGuidance({ probe: probeFor(UA.windows, { platform: 'Win32', maxTouchPoints: 0 }), canPrompt: true }).mode, 'none');
+    assert.equal(shouldOfferInstall({ ua: UA.windows, platform: 'Win32', maxTouchPoints: 0 }), false);
+  });
+
+  test('but a phone is', () => {
+    assert.equal(shouldOfferInstall({ ua: UA.iphone, platform: 'iPhone', maxTouchPoints: 5 }), true);
+    assert.equal(shouldOfferInstall({ ua: UA.androidChrome, platform: 'Linux armv8l', maxTouchPoints: 5 }), true);
   });
 });

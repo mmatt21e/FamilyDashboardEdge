@@ -384,6 +384,36 @@ a { color: var(--accent); }
 }
 .tile:hover .tile__people, .tile:focus-visible .tile__people { opacity: 1; }
 
+/* --- Invitations and the install step ------------------------------------- */
+
+.view--install { text-align: center; padding-top: 2rem; max-width: 32rem; margin: 0 auto; }
+.row--center { justify-content: center; }
+
+.install-steps {
+  text-align: left; margin: 1rem 0; padding-left: 1.4rem;
+  display: grid; gap: .6rem;
+}
+.install-steps li { padding-left: .2rem; }
+
+.btn--link {
+  background: none; border: 0; color: var(--muted);
+  text-decoration: underline; padding: .5rem;
+}
+.btn--small { padding: .35rem .7rem; font-size: .82rem; }
+
+.invite-list { margin-top: 1.25rem; }
+.invite-row {
+  display: flex; align-items: center; gap: .6rem;
+  padding: .6rem 0; border-bottom: 1px solid var(--border);
+}
+.invite-row:last-child { border-bottom: 0; }
+.invite-row__text { flex: 1; min-width: 0; }
+.invite-row__text > div:first-child { font-weight: 600; word-break: break-word; }
+
+.pill--pending { background: var(--accent); color: var(--accent-text); }
+.pill--used { background: var(--ok); color: #fff; }
+.pill--gone { background: var(--surface-2); color: var(--muted); }
+
 /* --- Correcting tags by hand ---------------------------------------------- */
 
 /* A sheet rather than a centred dialog: on a phone it comes up from the bottom
