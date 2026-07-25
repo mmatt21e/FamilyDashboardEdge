@@ -64,15 +64,66 @@ function loadGis() {
 }
 
 /**
+ * Where the token is kept between page loads.
+ *
+ * A Drive token lasts an hour. Holding it only in a variable meant every cold
+ * start asked Google for a new one, and a home-screen app is nothing but cold
+ * starts - iOS discards it the moment you switch away, so opening Photos twice
+ * in an afternoon meant two trips through Google.
+ *
+ * sessionStorage rather than localStorage: it is a bearer token for the
+ * family's Drive, and it should not outlive the tab that fetched it. An hour is
+ * all it is good for anyway.
+ */
+const TOKEN_KEY = 'fd.drive.token';
+
+function rememberToken(token, expiry) {
+  accessToken = token;
+  tokenExpiry = expiry;
+  try {
+    sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiry }));
+  } catch { /* private mode; it just re-requests next time */ }
+}
+
+function recallToken() {
+  if (accessToken) return;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TOKEN_KEY) ?? 'null');
+    if (saved?.token && saved.expiry > Date.now()) {
+      accessToken = saved.token;
+      tokenExpiry = saved.expiry;
+    }
+  } catch { /* nothing worth recovering */ }
+}
+
+/**
  * Gets a usable Drive token.
  *
- * `interactive: false` tries silently first, which is what happens on every
- * app open after the first. Only when that fails do we show Google's consent
- * prompt, so the family is not asked to approve something every time.
+ * Two attempts, and the order is the whole point. The first asks Google for a
+ * token with `prompt: 'none'` - genuinely silent, no window, no account
+ * chooser, and it fails outright rather than asking anything. Only if that
+ * fails does the interactive one run.
+ *
+ * The previous version passed `prompt: ''`, which is not "silent" but "Google
+ * decides" - and Google frequently decides to show an account chooser, which is
+ * why opening Photos meant clicking through Google every single time.
  */
 export async function getAccessToken({ interactive = false, clientId } = {}) {
+  recallToken();
   if (accessToken && Date.now() < tokenExpiry - 60_000) return accessToken;
 
+  if (!interactive) {
+    try {
+      return await requestToken({ clientId, prompt: 'none' });
+    } catch {
+      // Needs a human: no Google session, no prior grant, or Safari blocking
+      // the cookie the silent path relies on. Fall through and ask properly.
+    }
+  }
+  return requestToken({ clientId, prompt: interactive ? 'consent' : '' });
+}
+
+async function requestToken({ clientId, prompt }) {
   await loadGis();
   if (!tokenClient) {
     tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -113,8 +164,10 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
       if (response?.error) {
         return finish(reject, new Error(`${response.error}: ${response.error_description ?? 'Google refused the request.'}`));
       }
-      accessToken = response.access_token;
-      tokenExpiry = Date.now() + Number(response.expires_in ?? 3600) * 1000;
+      rememberToken(
+        response.access_token,
+        Date.now() + Number(response.expires_in ?? 3600) * 1000,
+      );
       finish(resolve, accessToken);
     };
 
@@ -125,7 +178,7 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
     };
 
     try {
-      tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+      tokenClient.requestAccessToken({ prompt });
     } catch (error) {
       finish(reject, error);
     }
@@ -133,23 +186,38 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
 }
 
 export function hasDriveAccess() {
+  recallToken();
   return Boolean(accessToken) && Date.now() < tokenExpiry;
 }
 
 export function forgetDriveAccess() {
   accessToken = null;
   tokenExpiry = 0;
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* nothing to do */ }
 }
 
-async function driveFetch(path, { clientId, ...options } = {}) {
+/**
+ * One Drive request, renewing the token once if it is refused.
+ *
+ * The retry matters more than it looks. Scanning a nested archive is hundreds
+ * of requests rather than the handful it used to be, so the odds of one of them
+ * coming back 401 - an expiry landing mid-scan, or a transient refusal - went
+ * up by the same multiple. Without a retry, a single blip threw the token away
+ * and the next thing anyone did asked Google for permission again. That is the
+ * "it prompts me every time I open Photos" behaviour.
+ */
+async function driveFetch(path, { clientId, retried = false, ...options } = {}) {
   const token = await getAccessToken({ clientId });
   const response = await fetch(`https://www.googleapis.com/drive/v3/${path}`, {
     ...options,
     headers: { Authorization: `Bearer ${token}`, ...(options.headers ?? {}) },
   });
+
   if (response.status === 401) {
-    // Token rejected: drop it so the next call re-requests rather than looping.
     forgetDriveAccess();
+    // Once only, and silently. If the second attempt is refused too, this is a
+    // real expiry rather than a blip and the caller should hear about it.
+    if (!retried) return driveFetch(path, { clientId, retried: true, ...options });
     throw new Error('Drive access expired. Pull down to refresh.');
   }
   if (!response.ok) {
