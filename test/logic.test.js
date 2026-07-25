@@ -538,3 +538,57 @@ describe('drive failure diagnosis', () => {
     }
   });
 });
+
+describe('setup links', () => {
+  const cfg = {
+    familyName: 'Edge',
+    firebase: { apiKey: 'k', authDomain: 'a.firebaseapp.com', projectId: 'p', appId: '1:2:web:3' },
+    googleClientId: '9.apps.googleusercontent.com',
+    driveFolderId: 'folder',
+  };
+
+  test('a link round-trips without asking for anything again', async () => {
+    const { toSetupLink, parseSetupCode, validateConfig } = await import('../src/config.js');
+    const link = toSetupLink(cfg, 'https://example.com/app/');
+    const back = parseSetupCode(link);
+
+    assert.deepEqual(validateConfig(back), [], 'a shared link must be complete enough to skip Setup');
+    assert.equal(back.firebase.projectId, 'p');
+    assert.equal(back.driveFolderId, 'folder');
+  });
+
+  // Chat apps wrap and truncate long URLs, so accept whatever survives.
+  test('accepts the whole link, the fragment, or just the code', async () => {
+    const { toSetupLink, parseSetupCode } = await import('../src/config.js');
+    const link = toSetupLink(cfg, 'https://example.com/app/');
+    const code = link.split('setup=')[1];
+
+    for (const input of [link, `#setup=${code}`, code, `  ${code}  `]) {
+      assert.equal(parseSetupCode(input)?.firebase.projectId, 'p', `failed for: ${input.slice(0, 30)}`);
+    }
+  });
+
+  test('rejects a truncated link rather than half-configuring a device', async () => {
+    const { toSetupLink, parseSetupCode } = await import('../src/config.js');
+    const code = toSetupLink(cfg, 'https://example.com/app/').split('setup=')[1];
+    assert.equal(parseSetupCode(code.slice(0, 40)), null);
+  });
+
+  test('ignores text that is not a setup link', async () => {
+    const { parseSetupCode } = await import('../src/config.js');
+    for (const junk of ['', 'hello', 'https://example.com/', null, undefined, 'short']) {
+      assert.equal(parseSetupCode(junk), null);
+    }
+  });
+
+  // Length is what gets links mangled in transit, so keep the payload lean.
+  test('omits empty fields to keep the link short', async () => {
+    const { toSetupLink } = await import('../src/config.js');
+    const link = toSetupLink(cfg, 'https://example.com/app/');
+    assert.ok(link.length < 400, `link is ${link.length} chars`);
+
+    const code = link.split('setup=')[1];
+    const json = Buffer.from(code.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
+    assert.ok(!json.includes('""'), `empty values were encoded: ${json}`);
+  });
+});

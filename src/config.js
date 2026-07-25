@@ -262,18 +262,50 @@ function b64urlDecode(str) {
  * send a house key photo: to the family, not to a public channel.
  */
 export function toSetupLink(config, baseUrl = location.href.split('#')[0]) {
-  const payload = b64urlEncode(JSON.stringify(normaliseConfig(config)));
-  return `${baseUrl}#setup=${payload}`;
+  const full = normaliseConfig(config);
+
+  // Drop empty values before encoding. normaliseConfig fills every key in, and
+  // carrying `"storageBucket":""` style padding makes an already-long link
+  // longer for no benefit - and length is what gets links broken in transit.
+  const compact = {
+    ...full,
+    firebase: Object.fromEntries(Object.entries(full.firebase).filter(([, v]) => v)),
+  };
+  for (const [key, value] of Object.entries(compact)) {
+    if (value === '' || value == null) delete compact[key];
+  }
+
+  return `${baseUrl}#setup=${b64urlEncode(JSON.stringify(compact))}`;
+}
+
+/**
+ * Reads a setup payload from a full link, a bare hash, or just the code.
+ *
+ * The link is ~400 characters of base64, and messaging apps routinely wrap or
+ * truncate URLs that long. When that happens the recipient lands on the Setup
+ * screen and is asked for Firebase details they should never have to see - so
+ * the Setup screen offers a paste box, and this accepts whatever they paste:
+ * the whole URL, the "#setup=..." fragment, or the code on its own.
+ */
+export function parseSetupCode(input) {
+  if (typeof input !== 'string') return null;
+  const text = input.trim();
+  if (!text) return null;
+
+  const match = /[#&?]setup=([A-Za-z0-9\-_]+)/.exec(text);
+  const payload = match ? match[1]
+    : /^[A-Za-z0-9\-_]{20,}$/.test(text) ? text
+    : null;
+  if (!payload) return null;
+
+  try {
+    return normaliseConfig(JSON.parse(b64urlDecode(payload)));
+  } catch {
+    return null;
+  }
 }
 
 /** Reads a setup payload out of the URL hash, or null if there isn't one. */
 export function readSetupLink(hash = location.hash) {
-  const match = /[#&]setup=([A-Za-z0-9\-_]+)/.exec(hash || '');
-  if (!match) return null;
-  try {
-    const parsed = JSON.parse(b64urlDecode(match[1]));
-    return normaliseConfig(parsed);
-  } catch {
-    return null;
-  }
+  return parseSetupCode(hash);
 }

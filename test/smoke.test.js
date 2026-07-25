@@ -207,7 +207,7 @@ describe('setup', () => {
     ].join('\n');
 
     await page.fill('input[placeholder="The Smiths"]', 'The Testers');
-    await page.fill('textarea', consoleFile);
+    await page.fill('textarea[placeholder*="firebaseConfig"]', consoleFile);
     await page.fill('input[placeholder*="googleusercontent"]', '123.apps.googleusercontent.com');
     await page.fill('input[placeholder*="web address"]', 'folder-abc');
     await page.click('button:has-text("Save and continue")');
@@ -225,7 +225,7 @@ describe('setup', () => {
     const { page, context } = await openApp();
     await page.waitForSelector('.view--setup');
 
-    await page.fill('textarea', FIREBASE_SNIPPET);
+    await page.fill('textarea[placeholder*="firebaseConfig"]', FIREBASE_SNIPPET);
     await page.fill('input[placeholder*="googleusercontent"]', 'not-a-client-id');
     await page.fill('input[placeholder*="web address"]', 'folder-abc');
     await page.click('button:has-text("Save and continue")');
@@ -240,7 +240,7 @@ describe('setup', () => {
     await page.waitForSelector('.view--setup');
 
     await page.fill('input[placeholder="The Smiths"]', 'The Testers');
-    await page.fill('textarea', FIREBASE_SNIPPET);
+    await page.fill('textarea[placeholder*="firebaseConfig"]', FIREBASE_SNIPPET);
     await page.fill('input[placeholder*="googleusercontent"]', '123.apps.googleusercontent.com');
     await page.fill('input[placeholder*="web address"]', 'folder-abc');
     await page.click('button:has-text("Save and continue")');
@@ -328,5 +328,60 @@ describe('deployed under a GitHub Pages subpath', () => {
     // A leading "/" here would send the installed app to the wrong place.
     assert.ok(!manifest.start_url.startsWith('/'), `start_url must be relative: ${manifest.start_url}`);
     assert.ok(!manifest.scope.startsWith('/'), `scope must be relative: ${manifest.scope}`);
+  });
+});
+
+
+describe('setup link recipients', () => {
+  // The whole point of the share link: nobody but the first person should ever
+  // see the Firebase fields. If a link arrives mangled they land on Setup, and
+  // this paste box has to rescue them without a trip to the Google console.
+  const CONFIG = {
+    familyName: 'Linked Family',
+    firebase: { apiKey: 'k', authDomain: 'x.firebaseapp.com', projectId: 'linked', appId: '1:2:web:3' },
+    googleClientId: '999.apps.googleusercontent.com',
+    driveFolderId: 'shared-folder',
+  };
+  const CODE = Buffer.from(JSON.stringify(CONFIG))
+    .toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  test('pasting a setup link configures the device without touching Firebase fields', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+
+    await page.fill('textarea[placeholder*="family sent you"]', `https://example.com/app/#setup=${CODE}`);
+    await page.click('button:has-text("Use this link")');
+
+    await page.waitForFunction(() => localStorage.getItem('fd.config.v1') !== null, { timeout: 5000 });
+    const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('fd.config.v1')));
+    assert.equal(saved.firebase.projectId, 'linked');
+    assert.equal(saved.driveFolderId, 'shared-folder');
+    await context.close();
+  });
+
+  test('pasting just the code works too', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+    await page.fill('textarea[placeholder*="family sent you"]', CODE);
+    await page.click('button:has-text("Use this link")');
+
+    await page.waitForFunction(() => localStorage.getItem('fd.config.v1') !== null, { timeout: 5000 });
+    assert.equal(
+      JSON.parse(await page.evaluate(() => localStorage.getItem('fd.config.v1'))).firebase.projectId,
+      'linked',
+    );
+    await context.close();
+  });
+
+  test('a truncated link says so instead of half-configuring the device', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+    await page.fill('textarea[placeholder*="family sent you"]', CODE.slice(0, 30));
+    await page.click('button:has-text("Use this link")');
+
+    await page.waitForSelector('.form__errors:not([hidden])');
+    assert.match(await page.textContent('.form__errors'), /cut short|does not look like/i);
+    assert.equal(await page.evaluate(() => localStorage.getItem('fd.config.v1')), null);
+    await context.close();
   });
 });

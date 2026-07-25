@@ -162,11 +162,11 @@ export function interpretDriveFailure(failure, { projectId = '', folderId = '' }
   // GIS refuses to issue a token to an origin it does not recognise, and to
   // anyone who is not a test user while the app is unpublished. Both surface
   // as a failure to obtain a token rather than an HTTP status.
-  if (/no_token|token_timeout|popup|idpiframe|origin|access_denied|unregistered/i.test(text)) {
+  if (/no_token|token_timeout|popup|idpiframe|origin|access_denied|unregistered|invalid_client|401/i.test(text)) {
     return {
       code: 'drive-not-authorised',
       title: 'Google would not grant access to Drive',
-      detail: 'Google refused to issue permission for this site. That is almost always one of two settings.',
+      detail: 'Google refused to issue permission for this site — usually shown as “Error 401: invalid_client” or “no registered origin”. That is almost always one of two settings.',
       fix: 'In Google Cloud Console: (1) APIs & Services → Credentials → your Web client → add https://mmatt21e.github.io to Authorised JavaScript origins, with no path or trailing slash. (2) OAuth consent screen → Test users → add every family member’s email.',
       url: projectId
         ? `https://console.cloud.google.com/apis/credentials?project=${projectId}`

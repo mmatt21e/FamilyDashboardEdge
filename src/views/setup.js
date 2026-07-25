@@ -7,7 +7,7 @@
 
 import { el, toast, spinner, children } from '../ui.js';
 import {
-  saveConfig, validateConfig, parseFirebaseSnippet,
+  saveConfig, validateConfig, parseFirebaseSnippet, parseSetupCode,
   toSetupLink, loadConfig, clearConfig, normaliseConfig,
 } from '../config.js';
 
@@ -85,6 +85,7 @@ export function setupView({ onSaved, existing = null } = {}) {
         'This is a one-off. Once it is done you can send everyone else a link that sets up their phone in one tap.'),
     ),
     errorBox,
+    pasteCodeCard(onSaved, showErrors),
     el('div', { class: 'card' },
       familyName.node,
       el('label', { class: 'field' },
@@ -110,6 +111,51 @@ export function setupView({ onSaved, existing = null } = {}) {
       el('p', { class: 'muted small' },
         'None of these are secret. They identify your project rather than granting access to it, which is why they are safe to type into an app and share with family.'),
     ),
+  );
+}
+
+/**
+ * "Someone sent me a link" — the first thing on the Setup screen.
+ *
+ * A setup link is a few hundred characters, and messaging apps wrap or truncate
+ * URLs that long. When that happens the recipient lands here and would
+ * otherwise be asked for Firebase details they should never have to see. This
+ * accepts the whole link, the #setup=... fragment, or just the code, so a
+ * broken link costs one paste rather than a trip through the Google console.
+ */
+function pasteCodeCard(onSaved, showErrors) {
+  const input = el('textarea', {
+    class: 'input input--code', rows: 2, spellcheck: 'false',
+    placeholder: 'Paste the link your family sent you',
+  });
+
+  const use = el('button', { class: 'btn btn--primary' }, 'Use this link');
+  use.addEventListener('click', () => {
+    const parsed = parseSetupCode(input.value);
+    if (!parsed) {
+      return showErrors([
+        'That does not look like a setup link. Copy the whole link from the message — if it was cut short, ask for it again.',
+      ]);
+    }
+    const errors = validateConfig(parsed);
+    if (errors.length) {
+      return showErrors(['That setup link is incomplete. Ask whoever sent it to copy the whole thing.', ...errors]);
+    }
+    try {
+      const saved = saveConfig(parsed);
+      toast('Set up from your family’s link');
+      onSaved?.(saved);
+    } catch (error) {
+      showErrors([error.message]);
+    }
+  });
+
+  return el('details', { class: 'card', open: true },
+    el('summary', {}, 'Someone sent me a setup link'),
+    el('p', { class: 'muted small' },
+      'If a family member sent you a link, paste it here. You will not need any of the settings below.'),
+    input,
+    el('div', { class: 'row row--end' }, use),
   );
 }
 
