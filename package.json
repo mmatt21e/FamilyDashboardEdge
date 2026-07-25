@@ -1,0 +1,12 @@
+{
+  "name": "family-dashboard",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "db:reset": "./scripts/db-reset.sh",
+    "test:rls": "./scripts/test-rls.sh",
+    "test:core": "node --experimental-strip-types --test packages/core/test/*.test.ts",
+    "test": "./scripts/test-rls.sh && npm run test:core"
+  }
+}

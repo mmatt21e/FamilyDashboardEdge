@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+
+# local Postgres data directories
+pgdata/
+/tmp-pg/
+
+# local environment
+.env
+.env.local
