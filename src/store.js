@@ -17,6 +17,7 @@ export const state = {
   member: null,
   modules: resolveState(null),
   files: [],          // pointer records, newest first
+  catalog: null,      // imported photo tags: who is in each photo, events
   filesLoadedAt: 0,
   driveReady: false,
   loadingFiles: false,

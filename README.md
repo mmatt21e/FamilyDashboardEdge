@@ -16,6 +16,7 @@ and it never handles anyone else's data.
 | Add to Home Screen on iPhone and Android | Working |
 | Sign in with your own Google account | Working |
 | **Photos** — everything in the shared Drive folder | Working |
+| **Filter photos** by who is in them, year, month, event, folder or text | Working |
 | **Memories** — on this day, a year / four years / ten years ago | Working |
 | **Calendar** — visits, trips, when everyone is together | Working |
 | **Message board** — short updates and photos | Working |
@@ -116,6 +117,41 @@ be uploading.
 Give each phone its own subfolder named after the person. That is how the app
 knows whose photos are whose.
 
+### Filtering by who is in a photo
+
+Photos can be filtered by **person, year, month, event, folder and free text**,
+in any combination — "Jocelyn and Mindy, 2010" is one tap plus a dropdown.
+
+Knowing *who* is in a photo is the one thing Drive cannot tell you, so it comes
+from a face-recognition pass run once, offline, on a computer with the archive
+attached. That pass produces three CSVs, which are imported through
+**Settings → Photo tags → Import photo tags**:
+
+| File | What it provides |
+|---|---|
+| `image_person_tags.csv` | who is in each photo |
+| `people_index_v2.csv` | the date each photo was taken, and its event |
+| `clusters_to_name.csv` | how much of the run has been named (reporting only) |
+
+The files are read on the device and never uploaded — only the photo-to-people
+mapping they describe is saved, into your own Firestore. Photos are matched **by
+filename**, so it works whether you upload the organised copies or the originals
+straight off the camera. Where a camera filename is ambiguous (`DSC_0220.JPG`
+exists in four folders), the photo is left untagged rather than guessed at.
+
+Two things worth knowing about the data:
+
+- **A face cluster is not a person.** One person is typically spread across
+  dozens of clusters — different ages, lighting and angles. The importer merges
+  people by *name*, which is what both per-image CSVs already use. Clusters left
+  unnamed contribute nothing, and the import preview tells you how many there are.
+- **Filtering happens in the browser**, over the listing already in memory. That
+  is what makes any combination of filters possible: Firestore allows one
+  `array-contains` per query and needs a composite index per combination, so
+  "these two people, this year, this event" is not a query it can answer. The
+  trade is that the tagged library has to fit in memory — fine for the few
+  thousand photos a family actually curates, which is a good reason to curate.
+
 ### Seed the memories
 
 Memories has nothing to show on day one. Drop a few hundred older photos into
@@ -171,6 +207,9 @@ src/
   modules.js          the feature registry — add a feature here
   memories.js         "on this day" date logic
   files.js            Drive metadata → pointer records
+  catalog.js          face-tag CSVs → who is in each photo
+  catalog-store.js    where those tags live in Firestore
+  photo-filter.js     the photo filter bar's logic
   firebase.js         sign-in and data
   drive.js            the shared folder
   views/              one file per screen

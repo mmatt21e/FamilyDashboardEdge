@@ -99,8 +99,8 @@ export function isStandalone() {
 // Firestore
 // ---------------------------------------------------------------------------
 // One family, so paths are flat: /members, /modules, /files, /messages,
-// /calendar_events, /lists, /list_items. No tenant id anywhere - this app is
-// deliberately single-family and adding one would be dead weight.
+// /calendar_events, /lists, /list_items, /photo_catalog. No tenant id anywhere -
+// this app is deliberately single-family and adding one would be dead weight.
 
 export async function getDoc(path, id) {
   const ref = dbMod.doc(db, path, id);
@@ -119,6 +119,50 @@ export async function addDoc(path, data) {
 
 export async function deleteDoc(path, id) {
   await dbMod.deleteDoc(dbMod.doc(db, path, id));
+}
+
+/**
+ * Writes many documents in batches.
+ *
+ * One round trip per document is fine for the handful of writes the rest of the
+ * app does, but the photo catalog import writes a whole archive's worth at
+ * once and doing that serially over a phone connection takes minutes. Firestore
+ * allows 500 operations per batch; 400 leaves room and keeps each request small.
+ *
+ * @param {Array<{path: string, id: string, data: object}>} writes
+ * @param {(done: number, total: number) => void} [onProgress]
+ */
+export async function writeBatched(writes, onProgress = null) {
+  const BATCH_LIMIT = 400;
+  let done = 0;
+
+  for (let i = 0; i < writes.length; i += BATCH_LIMIT) {
+    const slice = writes.slice(i, i + BATCH_LIMIT);
+    const batch = dbMod.writeBatch(db);
+    for (const { path, id, data } of slice) {
+      batch.set(dbMod.doc(db, path, id), data);
+    }
+    await batch.commit();
+    done += slice.length;
+    onProgress?.(done, writes.length);
+  }
+  return done;
+}
+
+/** Deletes many documents in batches. Used to replace a catalog cleanly. */
+export async function deleteBatched(path, ids, onProgress = null) {
+  const BATCH_LIMIT = 400;
+  let done = 0;
+
+  for (let i = 0; i < ids.length; i += BATCH_LIMIT) {
+    const slice = ids.slice(i, i + BATCH_LIMIT);
+    const batch = dbMod.writeBatch(db);
+    for (const id of slice) batch.delete(dbMod.doc(db, path, id));
+    await batch.commit();
+    done += slice.length;
+    onProgress?.(done, ids.length);
+  }
+  return done;
 }
 
 /**

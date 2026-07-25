@@ -22,6 +22,7 @@ import { settingsView } from './views/settings.js';
 import { photosView, memoriesView } from './views/photos.js';
 import { feedView, calendarView } from './views/feed.js';
 import { onboardingView } from './views/onboarding.js';
+import { importTagsView, primeCatalog } from './views/import-tags.js';
 
 const root = document.getElementById('app');
 
@@ -144,6 +145,10 @@ async function boot() {
     }
 
     await loadModuleSettings();
+    // Photo tags, if any were imported. Not awaited - the dashboard should not
+    // wait on a filter feature, and Photos loads them itself if this loses the
+    // race.
+    void primeCatalog();
     startApp();
   });
 }
@@ -200,6 +205,7 @@ function registerRoutes() {
   router.route('/calendar', gated('calendar', calendarView));
   router.route('/settings', settingsView);
   router.route('/setup-checklist', onboardingView);
+  router.route('/photo-tags', importTagsView);
   router.setNotFound(async () => el('div', { class: 'view' },
     el('h1', {}, 'Not found'),
     el('a', { class: 'btn', href: '#/' }, 'Go home'),

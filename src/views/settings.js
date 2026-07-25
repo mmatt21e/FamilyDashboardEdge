@@ -15,6 +15,7 @@ export async function settingsView() {
     appearanceCard(),
     await notificationsCard(),
     modulesCard(),
+    photoTagsCard(),
     shareSetupCard(state.config),
     accountCard(),
   );
@@ -99,6 +100,30 @@ function moduleRow(module) {
       el('span', { class: 'muted small' }, module.desc),
     ),
     el('span', { class: 'switch' }, input, el('span', { class: 'switch__track' })),
+  );
+}
+
+/**
+ * The way in to the photo tag import.
+ *
+ * It lives in Settings rather than in Photos because it is a once-in-a-while
+ * job done at a keyboard with the CSVs to hand, not something anyone does while
+ * browsing the grid on a phone.
+ */
+function photoTagsCard() {
+  const catalog = state.catalog;
+
+  return el('section', { class: 'card' },
+    el('h2', {}, 'Photo tags'),
+    catalog
+      ? el('p', { class: 'muted small' },
+          `${catalog.count.toLocaleString()} photos tagged with ${catalog.people.length} people`
+          + `${catalog.events.length ? ` across ${catalog.events.length} events` : ''}. `
+          + 'Photos can be filtered by any of them.')
+      : el('p', { class: 'muted small' },
+          'Import the files from a face-recognition run to filter photos by who is in them, '
+          + 'as well as by year and event.'),
+    el('a', { class: 'btn', href: '#/photo-tags' }, catalog ? 'Manage photo tags' : 'Import photo tags'),
   );
 }
 
