@@ -155,8 +155,10 @@ for the first photo…" or "Connected". Checking at the destination is the only
 way to know it really worked — PhotoSync can look correctly set up and still not
 be uploading.
 
-Give each phone its own subfolder named after the person. That is how the app
-knows whose photos are whose.
+Point PhotoSync at `Dashboard_Image_Storage/<your name>` — the app creates that
+folder for each family member. That is how it knows whose photos are whose. A
+folder at the top level named after the person works just as well, so an
+existing setup does not need changing.
 
 ### Filtering by who is in a photo
 
@@ -355,9 +357,49 @@ this year, this event" instant, because the whole index fits in memory; two
 hundred thousand photos would mean a composite Firestore index per combination
 and nobody maintaining them.
 
-Nesting is fine — the scan walks the whole tree with pagination, so
-`01_Timeline/2015/2015-09/…` works. The **top-level** folder is what a photo is
-attributed to, which is why PhotoSync should point at a folder per person.
+## The shared folder's structure
+
+**The app builds this itself.** The first time anyone opens Photos it creates
+whatever is missing, and adds a folder for each family member. Settings →
+**Shared folder structure** shows what is there and creates anything absent on
+demand.
+
+```
+Family Dashboard/                  ← the shared folder (your driveFolderId)
+├── Archive/                       the old library, imported once, by year
+│   └── 2015/2015-09/…
+├── Events/                        named occasions, one folder each
+│   └── 2014 Cruise/…
+├── Dashboard_Image_Storage/       every photo and video
+│   ├── Dad/  Mom/  Jocey/  Matt/  a folder per person, made as people join
+│   │   └── 2026-07/…              app uploads land here, by month
+│   └── Shared/                    when we don't know whose it is
+└── Dashboard_Document_Storage/    anything that isn't a photo
+    └── 2026/
+```
+
+**Four folders at the top, forever** — however many people join. That is the
+whole point: a new member gets a folder inside the photo store, not another
+entry at the root. Uploads from the app go under whoever added them and then by
+month, so nothing is ever dropped loose in the shared folder.
+
+Point PhotoSync at `Dashboard_Image_Storage/<your name>` on each phone. A person
+folder at the *top* level works exactly as well — the app reads whichever it
+finds — so an existing setup does not need changing.
+
+Two things the app deliberately cannot do, because its Drive scopes are
+`drive.readonly` and `drive.file`:
+
+- **It cannot move or rename anything it did not create.** Folders you or
+  PhotoSync made are read and left alone. Tidying those is a drag-and-drop job
+  in Drive, by a person.
+- **It cannot repoint PhotoSync.** That is a setting on each phone.
+
+Nesting is fine at any depth — the scan walks the whole tree with pagination.
+The photo's *owner* is worked out from the whole path, skipping folders the app
+manages and folders that are just dates, so `Archive/2015/2015-09/` belongs to
+nobody in particular. That is the honest answer: everyone is in the archive, and
+the people tags are what say who.
 
 ---
 

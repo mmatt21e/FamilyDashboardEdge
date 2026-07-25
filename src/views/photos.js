@@ -11,8 +11,9 @@ import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
 import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from '../drive.js';
-import { toPointerRecord, sortByTakenDesc, KIND } from '../files.js';
+import { toPointerRecord, sortByTakenDesc, uploadPathFor, kindForMime, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
+import { provisionStructure } from '../folders.js';
 import { applyCatalog } from '../catalog.js';
 import { loadCatalog, loadEdits, cachedEdits, saveEdit, deleteEdit } from '../catalog-store.js';
 import { applyEdits, buildEdit, editedFields } from '../photo-edits.js';
@@ -110,7 +111,7 @@ async function doLoad() {
     });
 
     const records = scan.items
-      .map(({ file, folderName, ownerFolder }) => toPointerRecord(file, { folderName, ownerFolder }))
+      .map(({ file, path }) => toPointerRecord(file, { path }))
       .filter(Boolean);
 
     baseRecords = tag(records);
@@ -126,6 +127,7 @@ async function doLoad() {
     });
 
     void persistNewPointers(records);
+    void ensureStructureOnce();
   } catch (error) {
     // Translate into something the family can act on, rather than a raw status.
     const diagnosis = interpretDriveFailure(
@@ -133,6 +135,33 @@ async function doLoad() {
       { projectId: state.config?.firebase?.projectId, folderId: state.config?.driveFolderId },
     );
     update({ loadingFiles: false, fileError: diagnosis });
+  }
+}
+
+/**
+ * Builds the shared folder's structure, once a session.
+ *
+ * Done here rather than at start-up because a Drive token is already in hand by
+ * this point - asking for one during boot would put a Google consent dialog in
+ * front of somebody who has not yet seen the app. Every step is find-or-create,
+ * so the cost of running it again is four lookups and no writes, and a new
+ * member's folder appears the next time anybody opens Photos.
+ */
+let structureChecked = false;
+
+async function ensureStructureOnce() {
+  if (structureChecked) return;
+  structureChecked = true;
+
+  try {
+    const members = await fb.queryDocs('members', { limit: 100 });
+    await provisionStructure(state.config.driveFolderId, {
+      clientId: state.config.googleClientId,
+      members,
+    });
+  } catch {
+    // The photo grid does not depend on this. Settings has a button that
+    // reports properly if somebody wants to know why.
   }
 }
 
@@ -442,12 +471,18 @@ function uploadButton() {
     let done = 0;
     const uploaded = [];
 
+    // Everything from this batch is filed under whoever added it and the month
+    // it was added, so the shared folder stays browsable instead of becoming a
+    // root full of loose files nobody can place in two years' time.
+    const person = state.member?.name ?? state.user?.displayName ?? null;
+
     for (const file of files) {
       try {
         progress.textContent = `Uploading ${done + 1} of ${files.length}…`;
         const created = await uploadFile(file, {
           folderId: state.config.driveFolderId,
           clientId: state.config.googleClientId,
+          path: uploadPathFor({ kind: kindForMime(file.type), person }),
           onProgress: (fraction) => {
             progress.textContent = `Uploading ${done + 1} of ${files.length} — ${Math.round(fraction * 100)}%`;
           },

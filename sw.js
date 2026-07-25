@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v9';
+const CACHE_VERSION = 'v10';
 const CACHE = `family-dashboard-${CACHE_VERSION}`;
 
 const SHELL = [
@@ -26,6 +26,7 @@ const SHELL = [
   './src/drive.js',
   './src/files.js',
   './src/firebase.js',
+  './src/folders.js',
   './src/install.js',
   './src/invites.js',
   './src/memories.js',
@@ -38,6 +39,7 @@ const SHELL = [
   './src/ui.js',
   './src/views/feed.js',
   './src/views/import-tags.js',
+  './src/views/folders-card.js',
   './src/views/install-card.js',
   './src/views/invite.js',
   './src/views/photo-editor.js',

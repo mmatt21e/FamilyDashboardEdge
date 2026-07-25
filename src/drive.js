@@ -212,11 +212,11 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
  * matters because if a limit is hit, what has been collected is the shallow,
  * most-organised part of the tree rather than an arbitrary slice.
  *
- * Two folder names come back with each file:
- *
- *   `folderName`  the folder it actually sits in ("2015-09") - a filter facet
- *   `ownerFolder` the top-level folder under the root ("Matt", "01_Timeline") -
- *                 which is how PhotoSync uploads are attributed to a person
+ * Each file comes back with the full `path` of folder names above it, relative
+ * to the shared root - `['Dashboard_Image_Storage', 'Jocey', '2026-07']`. Just
+ * the immediate folder is not enough: in a nested archive that is "2015-09",
+ * which is a good thing to filter by and a useless answer to whose photo it is.
+ * files.js decides what the path means.
  *
  * @returns {Promise<{items: Array, folders: number, truncated: boolean}>}
  */
@@ -245,7 +245,7 @@ export async function walkFolders(folderId, listPage, {
   onProgress = null,
 } = {}) {
   const items = [];
-  const queue = [{ id: folderId, name: null, owner: null }];
+  const queue = [{ id: folderId, path: [] }];
   const seen = new Set([folderId]);
   let folders = 0;
   let truncated = false;
@@ -267,12 +267,9 @@ export async function walkFolders(folderId, listPage, {
             // visit the same folder twice and duplicate everything under it.
             if (seen.has(file.id)) continue;
             seen.add(file.id);
-            queue.push({
-              id: file.id,
-              name: file.name,
-              // Whoever owns the top level owns everything beneath it.
-              owner: folder.owner ?? file.name,
-            });
+            // The whole path is carried down, so a photo knows every folder
+            // above it and not merely the one it sits in.
+            queue.push({ id: file.id, path: [...folder.path, file.name] });
             continue;
           }
 
@@ -281,11 +278,11 @@ export async function walkFolders(folderId, listPage, {
           // a single folder overran the limit and then emptied the queue - the
           // scan stopped short and reported a complete library.
           if (items.length >= maxFiles) { truncated = true; break; }
-          items.push({ file, folderName: folder.name, ownerFolder: folder.owner });
+          items.push({ file, path: folder.path });
         }
 
         pageToken = page.nextPageToken;
-        onProgress?.({ files: items.length, folders, scanning: folder.name });
+        onProgress?.({ files: items.length, folders, scanning: folder.path.at(-1) ?? null });
       } while (pageToken && !truncated);
     } catch {
       // One unreadable folder must not blank the whole photo grid.
@@ -310,9 +307,82 @@ export async function fetchFileBlobUrl(fileId, { clientId } = {}) {
 }
 
 /** Uploads a file from the app into the shared folder. */
-export async function uploadFile(file, { folderId, clientId, onProgress } = {}) {
+/**
+ * Finds a folder by name inside another, or makes it.
+ *
+ * Drive has no "create if missing" and no path lookup - a folder is just a file
+ * whose name is not unique, so this is a search followed by a create. The
+ * search comes first every time, because two people adding photos on the same
+ * afternoon must land in the same folder rather than each making their own copy
+ * of "2026-07".
+ */
+const folderCache = new Map();
+
+export async function ensureFolder(parentId, name, { clientId } = {}) {
+  const key = `${parentId}/${name.toLowerCase()}`;
+  if (folderCache.has(key)) return folderCache.get(key);
+
+  // Drive's query language is single-quoted, so a folder called "Erica's" would
+  // otherwise close the string and break the query.
+  const safe = String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const params = new URLSearchParams({
+    q: [
+      `'${parentId}' in parents`,
+      `name = '${safe}'`,
+      `mimeType = '${FOLDER_MIME}'`,
+      'trashed = false',
+    ].join(' and '),
+    fields: 'files(id,name)',
+    pageSize: '1',
+  });
+
+  const found = await driveFetch(`files?${params}`, { clientId });
+  if (found.files?.length) {
+    folderCache.set(key, found.files[0].id);
+    return found.files[0].id;
+  }
+
+  const created = await driveFetch('files?fields=id', {
+    clientId,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parentId] }),
+  });
+  folderCache.set(key, created.id);
+  return created.id;
+}
+
+/** Walks a list of folder names from the root, creating any that are missing. */
+export async function ensureFolderPath(rootId, segments, { clientId } = {}) {
+  let parent = rootId;
+  for (const segment of segments ?? []) {
+    if (!segment) continue;
+    parent = await ensureFolder(parent, segment, { clientId });
+  }
+  return parent;
+}
+
+/** Forgets the folder ids, for when the shared folder is changed or reset. */
+export function forgetFolderCache() {
+  folderCache.clear();
+}
+
+/**
+ * Uploads a file into the shared folder.
+ *
+ * `path` is a list of folder names under the shared root, created on demand.
+ * Without it everything piles into the root, and a shared folder full of loose
+ * files is one nobody can make sense of later - which defeats the point of
+ * keeping the archive as plain Drive folders at all.
+ */
+export async function uploadFile(file, { folderId, clientId, onProgress, path = null } = {}) {
   const token = await getAccessToken({ clientId });
-  const metadata = { name: file.name, parents: [folderId] };
+
+  const parent = path?.length
+    ? await ensureFolderPath(folderId, path, { clientId })
+    : folderId;
+
+  const metadata = { name: file.name, parents: [parent] };
 
   const body = new FormData();
   body.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));

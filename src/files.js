@@ -19,6 +19,107 @@ export const KIND = {
   OTHER: 'other',
 };
 
+// ---------------------------------------------------------------------------
+// Where things live in the shared folder
+// ---------------------------------------------------------------------------
+
+/**
+ * The folders the app puts things in.
+ *
+ * The shared folder must not fill up with loose files. Anything dropped in the
+ * root is a file nobody can find again in two years, which defeats the point of
+ * keeping the archive in plain Drive folders in the first place - the whole
+ * promise is that someone can open this folder without the app and understand
+ * what they are looking at.
+ *
+ * These names match the folders already created by hand rather than inventing
+ * new ones. They are the *defaults*: the walk reads whatever is actually there.
+ */
+export const MANAGED = {
+  IMAGES: 'Dashboard_Image_Storage',
+  DOCUMENTS: 'Dashboard_Document_Storage',
+  ARCHIVE: 'Archive',
+  EVENTS: 'Events',
+};
+
+const MANAGED_NAMES = new Set(
+  Object.values(MANAGED).map((name) => name.toLowerCase()),
+);
+
+/** "2015", "2015-09", "2015-09-11" - a folder that files by date, not by person. */
+export function isDateFolder(name) {
+  return /^(19|20)\d{2}(-\d{2}){0,2}$/.test(String(name ?? '').trim());
+}
+
+export function isManagedFolder(name) {
+  return MANAGED_NAMES.has(String(name ?? '').trim().toLowerCase());
+}
+
+/**
+ * Who a photo belongs to, from the folders above it.
+ *
+ * The top-level folder is normally the answer - PhotoSync uploads into a folder
+ * per phone, so `Dad/IMG_0042.jpg` is Dad's. But the app's own folders organise
+ * rather than identify, so it looks one level past them:
+ *
+ *   Dad/2026/…                          -> Dad
+ *   Dashboard_Image_Storage/Jocey/…     -> Jocey
+ *   Archive/2015/2015-09/…              -> nobody, and that is correct
+ *
+ * The archive genuinely has no owner. Everyone is in it, which is what the
+ * people tags are for; claiming it belongs to "2015" or to "Archive" would put
+ * a meaningless entry in the filter menu and a wrong one in the caption.
+ */
+export function ownerFromPath(path = []) {
+  for (const segment of path) {
+    if (!segment) continue;
+    if (isManagedFolder(segment) || isDateFolder(segment)) continue;
+    return segment;
+  }
+  return null;
+}
+
+const pad = (n) => String(n).padStart(2, '0');
+
+/**
+ * A person's name, made safe to use as a folder.
+ *
+ * A slash would silently create a folder level in Drive, so "Mom/Dad" must not
+ * become a folder called Dad inside one called Mom.
+ */
+export function folderSafeName(name, fallback = 'Shared') {
+  const clean = String(name ?? '')
+    .replace(/[\\/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60);
+  return clean || fallback;
+}
+
+/** Where a family member's photos live. One folder each, under the image store. */
+export function personFolderPath(name) {
+  return [MANAGED.IMAGES, folderSafeName(name)];
+}
+
+/**
+ * Where a newly added file should be put.
+ *
+ * Photos go under the person who added them and then by month, so the folder
+ * stays browsable as it grows and a phone's worth of holiday snaps does not
+ * land in one directory of nine thousand. Anything that is not a photo or video
+ * goes to the document folder by year - documents are far fewer and nobody
+ * looks for a school letter by month.
+ */
+export function uploadPathFor({ kind = KIND.PHOTO, person = null, date = new Date() } = {}) {
+  const when = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
+  const year = String(when.getFullYear());
+
+  if (kind === KIND.PHOTO || kind === KIND.VIDEO) {
+    return [...personFolderPath(person), `${year}-${pad(when.getMonth() + 1)}`];
+  }
+  return [MANAGED.DOCUMENTS, year];
+}
+
 export function kindForMime(mime = '') {
   if (mime.startsWith('image/')) return KIND.PHOTO;
   if (mime.startsWith('video/')) return KIND.VIDEO;
@@ -127,8 +228,11 @@ export function originalDateFor(driveFile) {
  * whose photo it is - Drive reports the *account* that owns the file, which for
  * a shared folder is often whoever set it up rather than who took the picture.
  */
-export function toPointerRecord(driveFile, { ownerHint = null, folderName = null, ownerFolder = null } = {}) {
+export function toPointerRecord(driveFile, { ownerHint = null, path = [] } = {}) {
   if (!driveFile?.id) return null;
+
+  const folders = (path ?? []).filter(Boolean);
+  const folderName = folders.length ? folders[folders.length - 1] : null;
 
   const mime = driveFile.mimeType ?? '';
   const taken = originalDateFor(driveFile);
@@ -146,11 +250,14 @@ export function toPointerRecord(driveFile, { ownerHint = null, folderName = null
     width: driveFile.imageMediaMetadata?.width ?? null,
     height: driveFile.imageMediaMetadata?.height ?? null,
     thumbnailUrl: driveFile.thumbnailLink ?? null,
-    // The top-level folder is the person, when there is one - PhotoSync uploads
-    // into a folder per phone. The immediate folder is usually a month, which
-    // is useful to filter by and useless as an owner.
-    owner: ownerHint ?? ownerFolder ?? folderName ?? null,
-    folder: folderName ?? null,
+    // Derived from the whole path, not just the folder it sits in: in a nested
+    // archive that folder is "2015-09", which is a good thing to filter by and
+    // a useless answer to whose photo this is.
+    owner: ownerHint ?? ownerFromPath(folders),
+    folder: folderName,
+    // Kept so the app can tell an archive photo from somebody's phone upload
+    // without re-deriving it from the folder names every time.
+    path: folders,
     addedAt: new Date().toISOString(),
   };
 }

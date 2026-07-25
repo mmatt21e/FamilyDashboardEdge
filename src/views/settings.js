@@ -10,6 +10,7 @@ import * as fb from '../firebase.js';
 import { notificationsCard } from './notifications-card.js';
 import { inviteCard } from './invite.js';
 import { installCard } from './install-card.js';
+import { foldersCard } from './folders-card.js';
 
 export async function settingsView() {
   return el('div', { class: 'view' },
@@ -20,6 +21,7 @@ export async function settingsView() {
       await notificationsCard(),
       modulesCard(),
       photoTagsCard(),
+      foldersCard(),
       await inviteCard(),
       shareSetupCard(state.config),
       accountCard(),

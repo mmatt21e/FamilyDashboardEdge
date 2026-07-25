@@ -14,7 +14,9 @@ import assert from 'node:assert/strict';
 import { validateConfig, normaliseConfig, parseFirebaseSnippet } from '../src/config.js';
 import { defaultState, resolveState, isEnabled, navModules, MODULES, getModule } from '../src/modules.js';
 import { dayKeyFor, dayKeysForToday, groupByYearsAgo, isLeapYear, describeYearsAgo } from '../src/memories.js';
-import { parseExifDate, originalDateFor, toPointerRecord, kindForMime, sortByTakenDesc, formatSize, dateFromFilename } from '../src/files.js';
+import { parseExifDate, originalDateFor, toPointerRecord, kindForMime, sortByTakenDesc, formatSize, dateFromFilename,
+  ownerFromPath, isDateFolder, uploadPathFor, folderSafeName, personFolderPath } from '../src/files.js';
+import { memberFolderNames, ROOT_FOLDERS } from '../src/folders.js';
 import {
   parseCsv, basenameOf, catalogKey, parseTimestamp, parseEventBucket, buildCatalog,
   buildLookup, matchEntry, applyCatalog, toChunks, fromChunks, packEntry, detectCsvRole,
@@ -342,7 +344,7 @@ describe('drive files', () => {
       mimeType: 'image/jpeg',
       size: '2048',
       imageMediaMetadata: { time: '2019:07:04 18:30:00', width: 4032, height: 3024 },
-    }, { folderName: 'Dad’s phone' });
+    }, { path: ['Dad’s phone'] });
 
     assert.equal(record.driveId, 'abc');
     assert.equal(record.kind, 'photo');
@@ -1616,14 +1618,20 @@ describe('attributing a photo to a person', () => {
 
   // An organised archive nests by year and month, so the folder a photo sits in
   // is "2015-09" - a fine thing to filter by and a useless owner.
-  test('the owner is the top-level folder, not the month it sits in', () => {
-    const record = toPointerRecord(file, { folderName: '2015-09', ownerFolder: 'Matt' });
+  test('the owner comes from the whole path, not the folder it sits in', () => {
+    const record = toPointerRecord(file, { path: ['Matt', '2015', '2015-09'] });
     assert.equal(record.owner, 'Matt');
     assert.equal(record.folder, '2015-09');
   });
 
-  test('falls back to the immediate folder when there is no top-level one', () => {
-    assert.equal(toPointerRecord(file, { folderName: 'Erica' }).owner, 'Erica');
+  test('a photo one folder deep is owned by that folder', () => {
+    assert.equal(toPointerRecord(file, { path: ['Erica'] }).owner, 'Erica');
+  });
+
+  test('a photo loose in the shared root has no folder and no owner', () => {
+    const record = toPointerRecord(file, { path: [] });
+    assert.equal(record.owner, null);
+    assert.equal(record.folder, null);
   });
 });
 
@@ -1677,7 +1685,7 @@ describe('walking the shared folder', () => {
     assert.equal(calls.length, 3, 'should have asked for three pages');
   });
 
-  test('the photo keeps its own folder and its top-level owner', async () => {
+  test('a photo carries every folder above it', async () => {
     const { listPage } = fakeDrive({
       root: [folder('matt', 'Matt')],
       matt: [folder('m09', '2015-09')],
@@ -1685,15 +1693,13 @@ describe('walking the shared folder', () => {
     });
 
     const [item] = (await walkFolders('root', listPage)).items;
-    assert.equal(item.ownerFolder, 'Matt', 'the person is the top-level folder');
-    assert.equal(item.folderName, '2015-09', 'the month is what it sits in');
+    assert.deepEqual(item.path, ['Matt', '2015-09'], 'every folder above the photo, in order');
   });
 
   test('a photo loose in the root has no folder at all', async () => {
     const { listPage } = fakeDrive({ root: [photo('a', 'a.jpg')] });
     const [item] = (await walkFolders('root', listPage)).items;
-    assert.equal(item.ownerFolder, null);
-    assert.equal(item.folderName, null);
+    assert.deepEqual(item.path, []);
   });
 
   // A Drive file can sit in more than one folder, so a naive walk revisits and
@@ -1785,5 +1791,129 @@ describe('walking the shared folder', () => {
     const scan = await walkFolders('root', fakeDrive({ root: [] }).listPage);
     assert.deepEqual(scan.items, []);
     assert.equal(scan.truncated, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Keeping the shared folder organised
+// ---------------------------------------------------------------------------
+
+describe('working out whose photo it is from the path', () => {
+  // PhotoSync uploads into a folder per phone, so the top-level folder is
+  // normally the answer.
+  test('the top-level folder is the person', () => {
+    assert.equal(ownerFromPath(['Dad']), 'Dad');
+    assert.equal(ownerFromPath(['Jocey', '2026', '2026-07']), 'Jocey');
+  });
+
+  // The app's own folders organise; they do not identify.
+  test('looks past the folders the app manages', () => {
+    assert.equal(ownerFromPath(['Dashboard_Image_Storage', 'Jocey', '2026-07']), 'Jocey');
+    assert.equal(ownerFromPath(['Dashboard_Document_Storage', '2026']), null);
+  });
+
+  // Everyone is in the archive. Claiming it belongs to "Archive" or to "2015"
+  // would put a meaningless entry in the filter menu and a wrong one in the
+  // caption; the people tags are what answer this for archive photos.
+  test('the archive belongs to nobody, which is the honest answer', () => {
+    assert.equal(ownerFromPath(['Archive', '2015', '2015-09']), null);
+    assert.equal(ownerFromPath([]), null);
+    assert.equal(ownerFromPath(['2015', '2015-09']), null);
+  });
+
+  test('an event folder is named after the event, not a date', () => {
+    assert.equal(ownerFromPath(['Events', '2014 Cruise']), '2014 Cruise');
+  });
+
+  test('knows a date folder from a person', () => {
+    for (const name of ['2015', '2015-09', '2015-09-11', '1999']) {
+      assert.equal(isDateFolder(name), true, `${name} should read as a date`);
+    }
+    for (const name of ['Dad', '2015 Cruise', 'Summer', '15', '']) {
+      assert.equal(isDateFolder(name), false, `${name} should not read as a date`);
+    }
+  });
+});
+
+describe('where a new file is put', () => {
+  const july = new Date(2026, 6, 25);
+
+  // The shared folder must not fill up with loose files: the whole promise is
+  // that somebody can open it without the app and understand what they see.
+  test('photos go under the person who added them, then by month', () => {
+    assert.deepEqual(uploadPathFor({ kind: 'photo', person: 'Jocey', date: july }),
+      ['Dashboard_Image_Storage', 'Jocey', '2026-07']);
+    assert.deepEqual(uploadPathFor({ kind: 'video', person: 'Dad', date: july }),
+      ['Dashboard_Image_Storage', 'Dad', '2026-07']);
+  });
+
+  test('documents go by year, because nobody looks for a letter by month', () => {
+    assert.deepEqual(uploadPathFor({ kind: 'document', date: july }),
+      ['Dashboard_Document_Storage', '2026']);
+  });
+
+  test('an unknown person still gets a real folder rather than the root', () => {
+    assert.deepEqual(uploadPathFor({ kind: 'photo', person: null, date: july }),
+      ['Dashboard_Image_Storage', 'Shared', '2026-07']);
+  });
+
+  // A slash in a name would silently create a nested folder in Drive.
+  test('a name with a slash in it cannot invent a folder level', () => {
+    const path = uploadPathFor({ kind: 'photo', person: 'Mom/Dad', date: july });
+    assert.equal(path.length, 3);
+    assert.ok(!path[1].includes('/'));
+  });
+
+  test('a round trip lands the photo back with the right owner', () => {
+    const path = uploadPathFor({ kind: 'photo', person: 'Jocey', date: july });
+    const record = toPointerRecord({ id: '1', name: 'a.jpg', mimeType: 'image/jpeg' }, { path });
+    assert.equal(record.owner, 'Jocey');
+    assert.equal(record.folder, '2026-07');
+  });
+});
+
+describe('folders for family members', () => {
+  test('one per person, sorted', () => {
+    assert.deepEqual(
+      memberFolderNames([{ name: 'Mom' }, { name: 'Dad' }, { name: 'Jocey' }]),
+      ['Dad', 'Jocey', 'Mom'],
+    );
+  });
+
+  // Two devices, two spellings, one person. Without this the filter menu grows
+  // a duplicate that never goes away.
+  test('the same name in different case is one person', () => {
+    assert.deepEqual(memberFolderNames([{ name: 'Jocey' }, { name: 'jocey' }]), ['Jocey']);
+  });
+
+  test('falls back to the email when somebody has no display name', () => {
+    assert.deepEqual(memberFolderNames([{ email: 'her@example.com' }]), ['her@example.com']);
+  });
+
+  test('skips members with nothing to name a folder after', () => {
+    assert.deepEqual(memberFolderNames([{}, { name: '   ' }, { name: 'Dad' }]), ['Dad']);
+  });
+
+  // A slash would silently create a folder level inside another.
+  test('a name cannot smuggle in a folder level', () => {
+    assert.equal(folderSafeName('Mom/Dad'), 'Mom Dad');
+    assert.equal(folderSafeName('a\\b'), 'a b');
+    assert.equal(folderSafeName('  spaced   out  '), 'spaced out');
+  });
+
+  test('an empty name gets the shared folder rather than the root', () => {
+    assert.equal(folderSafeName(''), 'Shared');
+    assert.equal(folderSafeName(null), 'Shared');
+  });
+
+  test('a person folder sits inside the photo store, not at the top level', () => {
+    assert.deepEqual(personFolderPath('Jocey'), ['Dashboard_Image_Storage', 'Jocey']);
+  });
+
+  // Four at the top, forever - however many people join. That is the difference
+  // between a folder that stays legible and one that grows an entry per person.
+  test('the shared root has a fixed set of folders', () => {
+    assert.equal(ROOT_FOLDERS.length, 4);
+    assert.ok(ROOT_FOLDERS.every((f) => f.name && f.purpose));
   });
 });
