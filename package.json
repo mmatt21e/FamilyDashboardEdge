@@ -1,12 +1,16 @@
 {
   "name": "family-dashboard",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "description": "A private PWA dashboard for one family.",
   "scripts": {
-    "db:reset": "./scripts/db-reset.sh",
-    "test:rls": "./scripts/test-rls.sh",
-    "test:core": "node --experimental-strip-types --test packages/core/test/*.test.ts",
-    "test": "./scripts/test-rls.sh && npm run test:core"
+    "test": "node --test test/logic.test.js",
+    "test:browser": "node --test test/smoke.test.js",
+    "test:all": "npm test && npm run test:browser",
+    "serve": "python3 -m http.server 8080"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
   }
 }

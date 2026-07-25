@@ -1,0 +1,91 @@
+rules_version = '2';
+
+// Firestore security rules for the family dashboard.
+//
+// Paste these into Firebase console → Firestore Database → Rules → Publish.
+//
+// The model is deliberately simple because this is ONE family's private app,
+// not a multi-tenant product: if you have a document in /members, you are in
+// the family and you can read and write the family's data. There is no
+// per-record ownership beyond "you can only delete your own posts".
+//
+// BOOTSTRAPPING: the first member has to be added by hand, otherwise nobody
+// could ever get in - the rules require a member document to create a member
+// document. In the Firebase console, create:
+//
+//     /members/<your-firebase-auth-uid>   { email: "you@example.com" }
+//
+// After that, everyone else is added automatically when they first sign in.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // The allowlist. Membership is the only permission this app has.
+    function isFamily() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/members/$(request.auth.uid));
+    }
+
+    // --- members ------------------------------------------------------------
+    match /members/{uid} {
+      allow read: if isFamily();
+
+      // You may create or update only your OWN member document, and only once
+      // an existing member has added you. This is what stops a stranger who
+      // finds the app from signing in with Google and writing themselves in.
+      allow create, update: if isFamily() && request.auth.uid == uid;
+
+      // Removing someone is a deliberate act done in the console, not from the
+      // app, so nobody can lock the rest of the family out by accident.
+      allow delete: if false;
+    }
+
+    // --- module toggles -----------------------------------------------------
+    match /modules/{document=**} {
+      allow read, write: if isFamily();
+    }
+
+    // --- content ------------------------------------------------------------
+    // Anyone in the family can post; only the author can delete their own.
+    match /messages/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.authorId == request.auth.uid;
+      allow update: if isFamily() && resource.data.authorId == request.auth.uid;
+      allow delete: if isFamily() && resource.data.authorId == request.auth.uid;
+    }
+
+    match /calendar_events/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      // Plans change and anyone may be the one to update them, but only the
+      // person who added an event can remove it.
+      allow update: if isFamily();
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    // Pointer records for files in Drive. The files themselves are protected by
+    // Drive's own sharing, not by these rules.
+    match /files/{id} {
+      allow read, write: if isFamily();
+    }
+
+    // Generic list structure shared by shopping list, bucket list, watchlist,
+    // reading list, playlists and wish lists.
+    match /lists/{id} {
+      allow read, write: if isFamily();
+    }
+    match /list_items/{id} {
+      allow read, write: if isFamily();
+    }
+
+    // Anything not named above is denied. New modules must add their own block
+    // rather than inheriting blanket access.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

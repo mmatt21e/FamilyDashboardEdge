@@ -1,11 +1,4 @@
 node_modules/
-dist/
 *.log
-
-# local Postgres data directories
-pgdata/
-/tmp-pg/
-
-# local environment
+.DS_Store
 .env
-.env.local

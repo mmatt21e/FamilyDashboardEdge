@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover lets the app paint into the iPhone's rounded corners and
+     home-indicator area; the CSS then uses safe-area insets to keep content clear. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Family Dashboard</title>
+<meta name="description" content="A private dashboard for one family.">
+
+<meta name="theme-color" content="#f7f7f9">
+<meta name="color-scheme" content="light dark">
+
+<!-- iOS home-screen behaviour. Safari ignores the web manifest for these. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Family">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles/app.css">
+</head>
+<body>
+<!-- Rendered into by src/app.js. The inline fallback below is replaced on boot;
+     it only ever shows if JavaScript is off or the module fails to load. -->
+<div id="app">
+  <div class="view">
+    <noscript>
+      <h1>JavaScript is required</h1>
+      <p>This dashboard needs JavaScript switched on.</p>
+    </noscript>
+  </div>
+</div>
+
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
