@@ -331,6 +331,36 @@ in the browser console, which is why this used to be so hard to spot.
 Fix: Firebase console → Firestore Database → **Create database** → Production
 mode → then publish [`firestore.rules`](firestore.rules).
 
+## What to actually put in the shared folder
+
+Curate before you upload. This is the single decision that determines whether
+the dashboard feels good or unusable, and the numbers from one real archive make
+the case better than any argument:
+
+| Photos | Tree |
+|---:|---|
+| 95,919 | `_Unified_File_Library` — an unsorted re-copy of the same drive |
+| 82,459 | `Organized_Photos_v2/05_Untagged_Review` — backups of backups |
+| 11,927 | `Organized_Photos_v2` — other |
+| **8,605** | **`01_Timeline`** — the organised library |
+| **1,057** | **`02_Events`** — named occasions |
+
+89% of that drive is backups and unsorted duplicates. The organised library is
+**9,662 photos** — and every face-tagged photo lives inside it, so importing the
+tags after uploading those two trees means all of them land.
+
+Upload the organised trees. Leave the backup trees on the drive where they are
+already safe. A curated library is what makes filtering by "these two people,
+this year, this event" instant, because the whole index fits in memory; two
+hundred thousand photos would mean a composite Firestore index per combination
+and nobody maintaining them.
+
+Nesting is fine — the scan walks the whole tree with pagination, so
+`01_Timeline/2015/2015-09/…` works. The **top-level** folder is what a photo is
+attributed to, which is why PhotoSync should point at a folder per person.
+
+---
+
 ## Known limits
 
 - **iOS will not let a web app work in the background.** Data refreshes when you

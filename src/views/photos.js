@@ -85,9 +85,12 @@ async function doLoad() {
   const tag = (records) => applyCatalog(records, catalog?.lookup);
 
   // --- stage 1: the cached index -------------------------------------------
+  // Read in full, not the first page. A curated family library is thousands of
+  // photos, and a capped read shows a fraction of them as though that were all
+  // there is - which looks like working software and is not.
   if (!state.files.length) {
     try {
-      const cached = await fb.queryDocs('files', { orderBy: ['takenAt', 'desc'], limit: 500 });
+      const cached = await fb.readAll('files', { orderBy: ['takenAt', 'desc'] });
       if (cached.length) {
         baseRecords = tag(cached);
         update({ files: withEdits(baseRecords), driveReady: true });
@@ -101,11 +104,13 @@ async function doLoad() {
   // --- stage 2: reconcile against Drive ------------------------------------
   update({ loadingFiles: true, fileError: null });
   try {
-    const raw = await listSharedMedia(state.config.driveFolderId, {
+    const scan = await listSharedMedia(state.config.driveFolderId, {
       clientId: state.config.googleClientId,
+      onProgress: ({ files, folders }) => update({ scanProgress: { files, folders } }),
     });
-    const records = raw
-      .map(({ file, folderName }) => toPointerRecord(file, { folderName }))
+
+    const records = scan.items
+      .map(({ file, folderName, ownerFolder }) => toPointerRecord(file, { folderName, ownerFolder }))
       .filter(Boolean);
 
     baseRecords = tag(records);
@@ -114,6 +119,10 @@ async function doLoad() {
       filesLoadedAt: Date.now(),
       driveReady: true,
       loadingFiles: false,
+      scanProgress: null,
+      // Surfaced rather than swallowed: a library that stopped at the limit
+      // must not look like a library that ended there.
+      scanTruncated: scan.truncated,
     });
 
     void persistNewPointers(records);
@@ -130,29 +139,33 @@ async function doLoad() {
 /**
  * Writes pointer records for files Firestore has not seen before.
  *
- * Only *new* ones, and capped per run. A first sync can drop tens of thousands
- * of photos into the folder, and writing all of them would burn through the
- * Firestore free tier in one go for no benefit - the grid is already rendered
- * from the Drive scan by this point. The backlog fills in over subsequent
- * opens, and nothing breaks while it does.
+ * Only *new* ones, batched, and capped per run. The cap exists because a first
+ * sync can drop tens of thousands of photos into the folder and there is no
+ * benefit in writing all of them at once - the grid is already rendered from
+ * the Drive scan by this point, so the backlog can fill in over subsequent
+ * opens without anything appearing broken while it does.
  *
- * Tags are deliberately not written here. They live in the catalog, which is
- * the one place an import can replace them; copying them into every file
+ * Batched rather than one round trip per document: five thousand sequential
+ * writes over a phone connection is minutes of work for something that should
+ * be happening quietly in the background.
+ *
+ * Tags are deliberately not written here. They live in the catalog and the
+ * corrections, which are the places that own them; copying them into every file
  * record would mean a re-import silently disagreeing with itself.
  */
-const MAX_WRITES_PER_RUN = 200;
+const MAX_WRITES_PER_RUN = 2000;
 
 async function persistNewPointers(records) {
   try {
-    const existing = await fb.queryDocs('files', { limit: 1000 });
+    const existing = await fb.readAll('files');
     const known = new Set(existing.map((r) => r.driveId ?? r.id));
 
     const fresh = records.filter((r) => !known.has(r.driveId)).slice(0, MAX_WRITES_PER_RUN);
-    for (const record of fresh) {
-      // Keyed on the Drive id so a re-scan updates in place rather than
-      // creating a second record for the same photo.
-      await fb.setDoc('files', record.driveId, record);
-    }
+    if (!fresh.length) return;
+
+    // Keyed on the Drive id so a re-scan updates in place rather than creating
+    // a second record for the same photo.
+    await fb.writeBatched(fresh.map((record) => ({ path: 'files', id: record.driveId, data: record })));
   } catch {
     // Never let a caching failure break the photo grid; it is only an index.
   }
@@ -748,7 +761,14 @@ export async function photosView() {
 
   const draw = () => {
     if (state.loadingFiles && !state.files.length) {
-      return container.replaceChildren(spinner('Loading photos…'));
+      // A first scan of a large archive takes a while, so it counts out loud
+      // rather than showing a spinner that gives no sign of progress.
+      const progress = state.scanProgress;
+      return container.replaceChildren(spinner(
+        progress?.files
+          ? `Reading the shared folder — ${progress.files.toLocaleString()} so far…`
+          : 'Loading photos…',
+      ));
     }
     if (state.fileError) {
       return container.replaceChildren(driveProblem(state.fileError, async () => {
@@ -758,13 +778,17 @@ export async function photosView() {
       }));
     }
 
-    container.replaceChildren(
+    container.replaceChildren(...children(
       el('header', { class: 'view__header' }, el('h1', {}, 'Photos'), countSlot),
+      state.scanTruncated && el('p', { class: 'notice' },
+        'This is as much of the shared folder as one scan collects. Everything here works '
+        + 'normally; there are simply more photos in the folder than are being read. '
+        + 'Moving the older ones into their own folder keeps the rest quick.'),
       uploadButton(),
       barSlot,
       chipSlot,
       gridSlot,
-    );
+    ));
     drawResults();
   };
 

@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { validateConfig, normaliseConfig, parseFirebaseSnippet } from '../src/config.js';
 import { defaultState, resolveState, isEnabled, navModules, MODULES, getModule } from '../src/modules.js';
 import { dayKeyFor, dayKeysForToday, groupByYearsAgo, isLeapYear, describeYearsAgo } from '../src/memories.js';
-import { parseExifDate, originalDateFor, toPointerRecord, kindForMime, sortByTakenDesc, formatSize } from '../src/files.js';
+import { parseExifDate, originalDateFor, toPointerRecord, kindForMime, sortByTakenDesc, formatSize, dateFromFilename } from '../src/files.js';
 import {
   parseCsv, basenameOf, catalogKey, parseTimestamp, parseEventBucket, buildCatalog,
   buildLookup, matchEntry, applyCatalog, toChunks, fromChunks, packEntry, detectCsvRole,
@@ -32,6 +32,7 @@ import {
   toInviteLink, parseInviteCode, inviteMessage,
 } from '../src/invites.js';
 import { detectPlatform, installGuidance, shouldOfferInstall, OS } from '../src/install.js';
+import { walkFolders } from '../src/drive.js';
 
 const validConfig = {
   familyName: 'The Smiths',
@@ -1514,5 +1515,275 @@ describe('what to tell someone about installing', () => {
   test('but a phone is', () => {
     assert.equal(shouldOfferInstall({ ua: UA.iphone, platform: 'iPhone', maxTouchPoints: 5 }), true);
     assert.equal(shouldOfferInstall({ ua: UA.androidChrome, platform: 'Linux armv8l', maxTouchPoints: 5 }), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dating a photo whose camera metadata was stripped
+// ---------------------------------------------------------------------------
+
+describe('reading a date out of a filename', () => {
+  const now = new Date(2026, 6, 25);
+
+  // Only about half this family's archive carries a "Date taken" - anything
+  // through a messaging app or a Takeout export has lost it. Without this those
+  // photos fall back to the upload date and a 2008 birthday lands in this
+  // week's Memories.
+  test('reads the organiser format', () => {
+    const date = dateFromFilename('2015-09-11_161042_Jocelyn_DSC_0088_ae577ab9.jpg', { now });
+    assert.equal(date.getFullYear(), 2015);
+    assert.equal(date.getMonth(), 8);
+    assert.equal(date.getDate(), 11);
+    assert.equal(date.getHours(), 16);
+    assert.equal(date.getMinutes(), 10);
+  });
+
+  test('reads the formats phones and messaging apps produce', () => {
+    for (const [name, iso] of [
+      ['IMG_20150911_161042.jpg', '2015-09-11'],
+      ['VID-20150911-WA0002.mp4', '2015-09-11'],
+      ['Screenshot_2015-09-11-16-10-42.png', '2015-09-11'],
+      ['2015.09.11 birthday.jpg', '2015-09-11'],
+    ]) {
+      const date = dateFromFilename(name, { now });
+      assert.ok(date, `no date found in ${name}`);
+      assert.equal(
+        `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+        iso, `wrong date for ${name}`,
+      );
+    }
+  });
+
+  test('a date with no time lands at midday, not midnight', () => {
+    assert.equal(dateFromFilename('2015.09.11 birthday.jpg', { now }).getHours(), 12);
+  });
+
+  // A filename is a guess, and a wrong guess is worse than none: it would put a
+  // photo on a specific day in Memories with nothing to say it was invented.
+  test('refuses dates that are not dates', () => {
+    for (const name of [
+      'IMG_1234.jpg',            // a counter, not a date
+      '1234-56-78.jpg',          // month 56
+      '2015-02-30_x.jpg',        // a day February never has
+      '2015-11-31_x.jpg',        // a day November never has
+      '1985-06-01_x.jpg',        // before the range digital photos exist in
+      'DSC_0088.JPG',
+      '',
+    ]) {
+      assert.equal(dateFromFilename(name, { now }), null, `should not have parsed ${name}`);
+    }
+  });
+
+  test('refuses a date in the future, which is a version number', () => {
+    assert.equal(dateFromFilename('report-2030-01-01.jpg', { now }), null);
+  });
+
+  test('accepts a leap day in a leap year and refuses it otherwise', () => {
+    assert.ok(dateFromFilename('2016-02-29_x.jpg', { now }));
+    assert.equal(dateFromFilename('2015-02-29_x.jpg', { now }), null);
+  });
+});
+
+describe('which date wins', () => {
+  const exif = { id: '1', name: '2015-09-11_161042_x.jpg', mimeType: 'image/jpeg',
+    imageMediaMetadata: { time: '2001:01:01 08:00:00' }, createdTime: '2024-05-05T00:00:00Z' };
+
+  test('the camera beats the filename', () => {
+    assert.equal(originalDateFor(exif).getFullYear(), 2001);
+  });
+
+  // The whole point: createdTime on a bulk upload is the day it was uploaded.
+  test('the filename beats the upload date', () => {
+    const { imageMediaMetadata, ...noExif } = exif;
+    assert.equal(originalDateFor(noExif).getFullYear(), 2015);
+  });
+
+  test('the upload date is still there as a last resort', () => {
+    const bare = { id: '1', name: 'DSC_0088.JPG', mimeType: 'image/jpeg', createdTime: '2024-05-05T00:00:00Z' };
+    assert.equal(originalDateFor(bare).getFullYear(), 2024);
+  });
+
+  test('a pointer record picks up the filename date and its dayKey', () => {
+    const { imageMediaMetadata, ...noExif } = exif;
+    const record = toPointerRecord(noExif, {});
+    assert.equal(record.takenAt.slice(0, 4), '2015');
+    assert.equal(record.dayKey, '09-11');
+  });
+});
+
+describe('attributing a photo to a person', () => {
+  const file = { id: '1', name: 'a.jpg', mimeType: 'image/jpeg' };
+
+  // An organised archive nests by year and month, so the folder a photo sits in
+  // is "2015-09" - a fine thing to filter by and a useless owner.
+  test('the owner is the top-level folder, not the month it sits in', () => {
+    const record = toPointerRecord(file, { folderName: '2015-09', ownerFolder: 'Matt' });
+    assert.equal(record.owner, 'Matt');
+    assert.equal(record.folder, '2015-09');
+  });
+
+  test('falls back to the immediate folder when there is no top-level one', () => {
+    assert.equal(toPointerRecord(file, { folderName: 'Erica' }).owner, 'Erica');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Walking the shared Drive folder
+// ---------------------------------------------------------------------------
+
+/** A fake Drive: folder id -> children, served a page at a time. */
+function fakeDrive(tree, { pageSize = 1000 } = {}) {
+  const calls = [];
+  const listPage = async (id, pageToken) => {
+    calls.push({ id, pageToken });
+    const all = tree[id] ?? [];
+    const start = pageToken ? Number(pageToken) : 0;
+    const slice = all.slice(start, start + pageSize);
+    const next = start + pageSize < all.length ? String(start + pageSize) : null;
+    return { files: slice, nextPageToken: next };
+  };
+  return { listPage, calls };
+}
+
+const folder = (id, name) => ({ id, name, mimeType: 'application/vnd.google-apps.folder' });
+const photo = (id, name) => ({ id, name, mimeType: 'image/jpeg' });
+
+describe('walking the shared folder', () => {
+  // THE BUG THIS REPLACED. An organised archive nests by year and month:
+  // 01_Timeline/2015/2015-09/photo.jpg. The old walk stopped one level down, so
+  // it listed the year folders, found no images, and reported an empty library.
+  // Not an error - an empty grid, with nothing to say the scan had given up.
+  test('finds photos however deeply they are filed', async () => {
+    const { listPage } = fakeDrive({
+      root: [folder('timeline', '01_Timeline')],
+      timeline: [folder('y2015', '2015'), folder('y2016', '2016')],
+      y2015: [folder('m09', '2015-09')],
+      y2016: [folder('m02', '2016-02')],
+      m09: [photo('a', 'a.jpg'), photo('b', 'b.jpg')],
+      m02: [photo('c', 'c.jpg')],
+    });
+
+    const scan = await walkFolders('root', listPage);
+    assert.deepEqual(scan.items.map((i) => i.file.id).sort(), ['a', 'b', 'c']);
+    assert.equal(scan.truncated, false);
+  });
+
+  test('pages through a folder with more files than one request returns', async () => {
+    const many = Array.from({ length: 2500 }, (_, i) => photo(`p${i}`, `p${i}.jpg`));
+    const { listPage, calls } = fakeDrive({ root: many }, { pageSize: 1000 });
+
+    const scan = await walkFolders('root', listPage);
+    assert.equal(scan.items.length, 2500);
+    assert.equal(calls.length, 3, 'should have asked for three pages');
+  });
+
+  test('the photo keeps its own folder and its top-level owner', async () => {
+    const { listPage } = fakeDrive({
+      root: [folder('matt', 'Matt')],
+      matt: [folder('m09', '2015-09')],
+      m09: [photo('a', 'a.jpg')],
+    });
+
+    const [item] = (await walkFolders('root', listPage)).items;
+    assert.equal(item.ownerFolder, 'Matt', 'the person is the top-level folder');
+    assert.equal(item.folderName, '2015-09', 'the month is what it sits in');
+  });
+
+  test('a photo loose in the root has no folder at all', async () => {
+    const { listPage } = fakeDrive({ root: [photo('a', 'a.jpg')] });
+    const [item] = (await walkFolders('root', listPage)).items;
+    assert.equal(item.ownerFolder, null);
+    assert.equal(item.folderName, null);
+  });
+
+  // A Drive file can sit in more than one folder, so a naive walk revisits and
+  // duplicates everything beneath the shared one - or never finishes.
+  test('does not go round in circles when folders share a child', async () => {
+    const { listPage } = fakeDrive({
+      root: [folder('a', 'A'), folder('b', 'B')],
+      a: [folder('shared', 'Shared')],
+      b: [folder('shared', 'Shared')],
+      shared: [photo('p', 'p.jpg')],
+    });
+
+    const scan = await walkFolders('root', listPage);
+    assert.equal(scan.items.length, 1, 'the shared folder must be read once');
+  });
+
+  test('stops at the file limit and says so rather than pretending that is all', async () => {
+    const { listPage } = fakeDrive({
+      root: Array.from({ length: 50 }, (_, i) => photo(`p${i}`, `p${i}.jpg`)),
+    });
+    const scan = await walkFolders('root', listPage, { maxFiles: 20 });
+    assert.equal(scan.truncated, true);
+    assert.equal(scan.items.length, 20, 'the limit must actually be a limit');
+  });
+
+  // The bug the limit check moved for: one folder overran the cap and then
+  // emptied the queue, so nothing was left to trip the check between folders
+  // and a short scan reported itself complete.
+  test('a single oversized folder is still reported as truncated', async () => {
+    const { listPage } = fakeDrive({
+      root: Array.from({ length: 30 }, (_, i) => photo(`p${i}`, `p${i}.jpg`)),
+    });
+    assert.equal((await walkFolders('root', listPage, { maxFiles: 10 })).truncated, true);
+  });
+
+  test('a library that exactly fills the limit is not truncated', async () => {
+    const { listPage } = fakeDrive({
+      root: Array.from({ length: 10 }, (_, i) => photo(`p${i}`, `p${i}.jpg`)),
+    });
+    const scan = await walkFolders('root', listPage, { maxFiles: 10 });
+    assert.equal(scan.items.length, 10);
+    assert.equal(scan.truncated, false, 'nothing was dropped, so nothing should be claimed');
+  });
+
+  test('stops at the folder limit too', async () => {
+    const tree = { root: Array.from({ length: 30 }, (_, i) => folder(`f${i}`, `f${i}`)) };
+    for (let i = 0; i < 30; i += 1) tree[`f${i}`] = [photo(`p${i}`, `p${i}.jpg`)];
+
+    const scan = await walkFolders('root', fakeDrive(tree).listPage, { maxFolders: 5 });
+    assert.equal(scan.truncated, true);
+    assert.ok(scan.items.length < 30);
+  });
+
+  // Breadth-first, so hitting a limit keeps the shallow, organised part of the
+  // tree rather than an arbitrary slice of one deep branch.
+  test('reads shallow folders before deep ones', async () => {
+    const { listPage } = fakeDrive({
+      root: [folder('deep', 'Deep'), photo('shallow', 'shallow.jpg')],
+      deep: [folder('deeper', 'Deeper')],
+      deeper: [photo('buried', 'buried.jpg')],
+    });
+    const scan = await walkFolders('root', listPage, { maxFiles: 1 });
+    assert.equal(scan.items[0].file.id, 'shallow');
+  });
+
+  test('one unreadable folder does not blank the whole grid', async () => {
+    const listPage = async (id) => {
+      if (id === 'broken') throw new Error('403');
+      if (id === 'root') return { files: [folder('broken', 'Broken'), folder('ok', 'OK')], nextPageToken: null };
+      if (id === 'ok') return { files: [photo('a', 'a.jpg')], nextPageToken: null };
+      return { files: [], nextPageToken: null };
+    };
+    const scan = await walkFolders('root', listPage);
+    assert.deepEqual(scan.items.map((i) => i.file.id), ['a']);
+  });
+
+  test('reports progress as it goes, so a long scan does not look stuck', async () => {
+    const { listPage } = fakeDrive({
+      root: [folder('a', 'A')],
+      a: [photo('p1', 'p1.jpg'), photo('p2', 'p2.jpg')],
+    });
+    const seen = [];
+    await walkFolders('root', listPage, { onProgress: (p) => seen.push(p.files) });
+    assert.ok(seen.length >= 2);
+    assert.equal(seen[seen.length - 1], 2);
+  });
+
+  test('an empty folder is an empty result, not a crash', async () => {
+    const scan = await walkFolders('root', fakeDrive({ root: [] }).listPage);
+    assert.deepEqual(scan.items, []);
+    assert.equal(scan.truncated, false);
   });
 });

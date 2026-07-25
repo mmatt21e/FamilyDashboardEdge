@@ -172,8 +172,8 @@ const FILE_FIELDS = [
   'videoMediaMetadata(width,height,durationMillis)',
 ].join(',');
 
-/** Immediate children of a folder. */
-export async function listFolder(folderId, { clientId, pageSize = 200, pageToken = null, foldersOnly = false } = {}) {
+/** Immediate children of a folder. 1000 is the largest page Drive will return. */
+export async function listFolder(folderId, { clientId, pageSize = 1000, pageToken = null, foldersOnly = false } = {}) {
   const clauses = [`'${folderId}' in parents`, 'trashed = false'];
   if (foldersOnly) clauses.push("mimeType = 'application/vnd.google-apps.folder'");
 
@@ -189,42 +189,113 @@ export async function listFolder(folderId, { clientId, pageSize = 200, pageToken
   return { files: data.files ?? [], nextPageToken: data.nextPageToken ?? null };
 }
 
+const FOLDER_MIME = 'application/vnd.google-apps.folder';
+
 /**
- * Walks the shared folder including one level of per-person subfolders.
+ * Walks the whole shared folder.
  *
- * PhotoSync is normally pointed at a subfolder per phone, so the folder name is
- * how we attribute a photo to a person - see toPointerRecord in files.js.
- * Depth is capped at one level deliberately: a runaway recursion over a Drive
- * with thousands of folders would be slow and expensive on a phone.
+ * This used to stop after one level of subfolders and take the first 200 files
+ * from each, which was fine for the case it was written for - PhotoSync
+ * dropping photos into a folder per phone - and silently wrong for the case
+ * that actually turned up. An organised archive is nested by year and month:
+ *
+ *     Family photos/01_Timeline/2015/2015-09/…
+ *
+ * The photos are three levels down. A one-level walk sees `01_Timeline`, lists
+ * the *year folders* inside it, finds no images, and reports an empty library.
+ * Not an error - an empty grid, which is far worse, because nothing tells you
+ * the scan gave up.
+ *
+ * So it now walks breadth-first with real pagination, and the limits are on
+ * total work rather than on depth: depth is a property of how somebody chose to
+ * organise their photos, and guessing it wrong loses the lot. Breadth-first
+ * matters because if a limit is hit, what has been collected is the shallow,
+ * most-organised part of the tree rather than an arbitrary slice.
+ *
+ * Two folder names come back with each file:
+ *
+ *   `folderName`  the folder it actually sits in ("2015-09") - a filter facet
+ *   `ownerFolder` the top-level folder under the root ("Matt", "01_Timeline") -
+ *                 which is how PhotoSync uploads are attributed to a person
+ *
+ * @returns {Promise<{items: Array, folders: number, truncated: boolean}>}
  */
-export async function listSharedMedia(folderId, { clientId, maxPerFolder = 200 } = {}) {
-  const results = [];
-
-  const root = await listFolder(folderId, { clientId, pageSize: maxPerFolder });
-  for (const file of root.files) {
-    if (file.mimeType !== 'application/vnd.google-apps.folder') {
-      results.push({ file, folderName: null });
-    }
-  }
-
-  const subfolders = root.files.filter(
-    (f) => f.mimeType === 'application/vnd.google-apps.folder',
+export async function listSharedMedia(folderId, { clientId, ...options } = {}) {
+  return walkFolders(
+    folderId,
+    (id, pageToken) => listFolder(id, { clientId, pageToken }),
+    options,
   );
+}
 
-  for (const folder of subfolders) {
+/**
+ * The walk itself, with fetching passed in.
+ *
+ * Separated from `listSharedMedia` so it can be tested against a made-up folder
+ * tree rather than only against a real Drive. This is code whose bugs are
+ * silent - a walk that quietly stops early returns an empty grid, not an error
+ * - so being able to point it at a tree with known contents and check the count
+ * is worth the extra function.
+ *
+ * @param {(id: string, pageToken: string|null) => Promise<{files: Array, nextPageToken: string|null}>} listPage
+ */
+export async function walkFolders(folderId, listPage, {
+  maxFiles = 20_000,
+  maxFolders = 600,
+  onProgress = null,
+} = {}) {
+  const items = [];
+  const queue = [{ id: folderId, name: null, owner: null }];
+  const seen = new Set([folderId]);
+  let folders = 0;
+  let truncated = false;
+
+  while (queue.length && !truncated) {
+    if (folders >= maxFolders) { truncated = true; break; }
+
+    const folder = queue.shift();
+    folders += 1;
+    let pageToken = null;
+
     try {
-      const page = await listFolder(folder.id, { clientId, pageSize: maxPerFolder });
-      for (const file of page.files) {
-        if (file.mimeType !== 'application/vnd.google-apps.folder') {
-          results.push({ file, folderName: folder.name });
+      do {
+        const page = await listPage(folder.id, pageToken);
+
+        for (const file of page.files ?? []) {
+          if (file.mimeType === FOLDER_MIME) {
+            // A Drive file can have more than one parent, so a plain walk can
+            // visit the same folder twice and duplicate everything under it.
+            if (seen.has(file.id)) continue;
+            seen.add(file.id);
+            queue.push({
+              id: file.id,
+              name: file.name,
+              // Whoever owns the top level owns everything beneath it.
+              owner: folder.owner ?? file.name,
+            });
+            continue;
+          }
+
+          // Checked here, at the point of adding, rather than between folders.
+          // Testing it only at the top of the outer loop missed the case where
+          // a single folder overran the limit and then emptied the queue - the
+          // scan stopped short and reported a complete library.
+          if (items.length >= maxFiles) { truncated = true; break; }
+          items.push({ file, folderName: folder.name, ownerFolder: folder.owner });
         }
-      }
+
+        pageToken = page.nextPageToken;
+        onProgress?.({ files: items.length, folders, scanning: folder.name });
+      } while (pageToken && !truncated);
     } catch {
-      // One unreadable subfolder must not blank the whole photo grid.
+      // One unreadable folder must not blank the whole photo grid.
     }
   }
 
-  return results;
+  // Anything still queued when we stopped is a folder never opened.
+  if (queue.length) truncated = true;
+
+  return { items, folders, truncated };
 }
 
 /** A URL the app can show an image from. Needs the token, so images are fetched as blobs. */

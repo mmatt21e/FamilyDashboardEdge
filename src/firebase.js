@@ -185,6 +185,39 @@ export async function queryDocs(path, options = {}) {
 }
 
 /**
+ * Reads a whole collection, a page at a time.
+ *
+ * `queryDocs` takes a limit and stops there, which is right for a message board
+ * and wrong for the photo index: a curated family library is ten thousand
+ * pointer records, and a limit of five hundred silently shows five hundred
+ * photos as though that were all of them. Paging on the ordered field with
+ * `startAfter` is the only way to walk past that without holding a cursor open.
+ *
+ * @param {string} path
+ * @param {{orderBy?: [string,string], pageSize?: number, max?: number}} options
+ */
+export async function readAll(path, { orderBy = null, pageSize = 1000, max = 50_000 } = {}) {
+  const field = orderBy?.[0] ? orderBy[0] : dbMod.documentId();
+  const direction = orderBy?.[1] ?? 'asc';
+
+  const out = [];
+  let cursor = null;
+
+  while (out.length < max) {
+    const parts = [dbMod.orderBy(field, direction), dbMod.limit(pageSize)];
+    if (cursor) parts.push(dbMod.startAfter(cursor));
+
+    const snap = await dbMod.getDocs(dbMod.query(dbMod.collection(db, path), ...parts));
+    if (snap.empty) break;
+
+    for (const doc of snap.docs) out.push({ id: doc.id, ...doc.data() });
+    if (snap.docs.length < pageSize) break;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+  return out;
+}
+
+/**
  * Live subscription. Used sparingly - the message board and calendar benefit
  * from updating while you watch, but the photo grid does not and each listener
  * is an open connection on a battery-powered phone.

@@ -22,6 +22,8 @@ export const state = {
   driveReady: false,
   loadingFiles: false,
   fileError: null,
+  scanProgress: null,   // {files, folders} while the Drive walk is running
+  scanTruncated: false, // the library is bigger than one scan will collect
 };
 
 export function subscribe(listener) {

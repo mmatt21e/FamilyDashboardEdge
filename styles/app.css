@@ -384,6 +384,12 @@ a { color: var(--accent); }
 }
 .tile:hover .tile__people, .tile:focus-visible .tile__people { opacity: 1; }
 
+.notice {
+  background: var(--surface-2); border-left: 3px solid var(--accent);
+  border-radius: 8px; padding: .7rem .8rem; margin: .5rem 0;
+  color: var(--muted); font-size: .85rem;
+}
+
 /* --- Invitations and the install step ------------------------------------- */
 
 .view--install { text-align: center; padding-top: 2rem; max-width: 32rem; margin: 0 auto; }
