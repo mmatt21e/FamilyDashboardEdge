@@ -340,11 +340,20 @@ a { color: var(--accent); }
 .filter__summary::-webkit-details-marker { display: none; }
 .filter[open] > .filter__summary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
 
+/* Fixed, not absolute, and placed by JS when it opens. The filter bar is a
+   sideways scroll container, and a scroll container clips anything positioned
+   outside it - an absolute menu here opens underneath the photo grid where no
+   tap can reach it. Fixed positioning escapes every ancestor's clipping. */
 .filter__menu {
-  position: absolute; z-index: 30; top: calc(100% + .35rem); left: 0;
-  min-width: 15rem; max-height: 55dvh; overflow-y: auto;
+  position: fixed; z-index: 40;
+  min-width: 15rem; max-width: calc(100vw - 16px);
+  max-height: 55dvh; overflow-y: auto;
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow); padding: .4rem;
+  border-radius: var(--radius); padding: .4rem;
+  /* A real shadow of its own: it floats over the grid, and the theme's
+     --shadow is none in dark mode, which would leave its edges invisible
+     against the photos behind it. */
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .25);
 }
 .filter__option {
   display: flex; align-items: center; gap: .55rem;

@@ -847,10 +847,32 @@ function peopleFilter(facets, onChange) {
     : 'Anyone';
 
   const menu = el('div', { class: 'filter__menu' });
-  const wrap = el('details', { class: 'filter' },
-    el('summary', { class: 'filter__summary' }, `People: ${summaryText}`),
-    menu,
-  );
+  const summary = el('summary', { class: 'filter__summary' }, `People: ${summaryText}`);
+  const wrap = el('details', { class: 'filter' }, summary, menu);
+
+  // The menu is positioned FIXED and placed by hand when it opens. It used to
+  // be absolute inside the filter bar - but the bar scrolls sideways, and a
+  // scroll container clips everything that hangs outside it, vertically too.
+  // The menu opened, existed, and was painted underneath the photo grid, so a
+  // tap where an option should be landed on a photo instead. "Nothing happens
+  // when I click the people filter" was this, and no DOM inspection catches
+  // it: the options are all there, just not where a finger can reach them.
+  wrap.addEventListener('toggle', () => {
+    if (!wrap.open) return;
+    const anchor = summary.getBoundingClientRect();
+    menu.style.top = `${Math.round(anchor.bottom + 6)}px`;
+    menu.style.left = `${Math.round(Math.max(8, Math.min(anchor.left, window.innerWidth - menu.offsetWidth - 8)))}px`;
+    menu.style.maxHeight = `${Math.round(window.innerHeight - anchor.bottom - 24)}px`;
+  });
+
+  // Fixed positioning means clicks elsewhere no longer naturally dismiss it.
+  // The handler unregisters itself once the bar has been rebuilt and this
+  // menu is no longer in the document, so redraws cannot pile up listeners.
+  const closeOnOutsideTap = (event) => {
+    if (!wrap.isConnected) return document.removeEventListener('pointerdown', closeOnOutsideTap);
+    if (wrap.open && !wrap.contains(event.target)) wrap.open = false;
+  };
+  document.addEventListener('pointerdown', closeOnOutsideTap);
 
   if (filters.people.length > 1) {
     const mode = el('div', { class: 'segmented segmented--small' },
@@ -1044,7 +1066,19 @@ export async function photosView() {
     const facets = buildFacets(all);
     const shown = filterPhotos(all, filters);
 
-    if (!keepBar) barSlot.replaceChildren(filterBar(facets, onFilterChange));
+    // Rebuilding the bar closes the people menu, and the bar is rebuilt at
+    // moments the person did not cause: the scan finishing in the background,
+    // and their own tick of a checkbox inside the menu. Both used to slam the
+    // menu shut mid-use, so if it was open before the rebuild it is reopened
+    // after - with fresh contents, which is what the rebuild was for.
+    const menuWasOpen = Boolean(barSlot.querySelector('.filter[open]'));
+    if (!keepBar) {
+      barSlot.replaceChildren(filterBar(facets, onFilterChange));
+      if (menuWasOpen) {
+        const rebuilt = barSlot.querySelector('.filter');
+        if (rebuilt) rebuilt.open = true;
+      }
+    }
     chipSlot.replaceChildren(...children(activeChips(facets, onFilterChange)));
     countSlot.textContent = describeCount(shown.length, all.length);
 
