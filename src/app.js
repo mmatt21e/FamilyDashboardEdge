@@ -15,6 +15,7 @@ import { state, update, loadModuleSettings } from './store.js';
 import { isEnabled, navModules, getModule } from './modules.js';
 import * as fb from './firebase.js';
 import * as router from './router.js';
+import { diagnoseStartup, STARTUP_TIMEOUT_MS } from './diagnose.js';
 
 import { setupView, signInView } from './views/setup.js';
 import { settingsView } from './views/settings.js';
@@ -26,6 +27,48 @@ const root = document.getElementById('app');
 
 function screen(node) {
   root.replaceChildren(node);
+}
+
+// Startup watchdog.
+//
+// The Firestore SDK retries a missing backend forever rather than failing, so a
+// misconfigured project used to leave this app on its "Starting..." spinner
+// indefinitely with nothing in the console. Anything that gets us to a usable
+// screen disarms this; if nothing does, we stop guessing and go and find out
+// what is wrong.
+let watchdog = null;
+
+function armWatchdog(config) {
+  clearTimeout(watchdog);
+  watchdog = setTimeout(async () => {
+    const diagnosis = await diagnoseStartup(config);
+    screen(startupProblemView(diagnosis));
+  }, STARTUP_TIMEOUT_MS);
+}
+
+function disarmWatchdog() {
+  clearTimeout(watchdog);
+  watchdog = null;
+}
+
+/** What we show instead of spinning forever. */
+function startupProblemView(diagnosis) {
+  const retry = el('button', { class: 'btn btn--primary', onClick: () => location.reload() }, 'Try again');
+
+  return el('div', { class: 'view' },
+    el('div', { class: 'setup__logo' }, '🔧'),
+    el('h1', {}, diagnosis.title),
+    el('p', { class: 'muted' }, diagnosis.detail),
+    diagnosis.fix && el('div', { class: 'card' },
+      el('h2', {}, 'How to fix it'),
+      el('p', {}, diagnosis.fix),
+      diagnosis.url && el('a', { class: 'btn', href: diagnosis.url, target: '_blank', rel: 'noopener' },
+        'Open the Firebase console'),
+    ),
+    el('div', { class: 'row' }, retry),
+    el('p', { class: 'muted small' },
+      diagnosis.projectId ? `Project: ${diagnosis.projectId}` : ''),
+  );
 }
 
 async function boot() {
@@ -53,10 +96,12 @@ async function boot() {
   update({ config });
 
   screen(el('div', { class: 'view' }, spinner('Starting…')));
+  armWatchdog(config);
 
   try {
     await fb.initFirebase(config);
   } catch (error) {
+    disarmWatchdog();
     return screen(el('div', { class: 'view' },
       el('h1', {}, 'Could not connect'),
       el('p', { class: 'muted' },
@@ -71,6 +116,7 @@ async function boot() {
 
   fb.onAuthChange(async (user) => {
     if (!user) {
+      disarmWatchdog();
       update({ user: null, member: null });
       return screen(signInView({
         config,
@@ -85,6 +131,7 @@ async function boot() {
     } catch {
       // Firestore rules will reject anyone not on the family allowlist. Say so
       // plainly rather than showing a broken app behind a generic error.
+      disarmWatchdog();
       return screen(el('div', { class: 'view' },
         el('h1', {}, 'Not on the family list'),
         el('p', { class: 'muted' },
@@ -104,6 +151,7 @@ async function boot() {
 let started = false;
 
 function startApp() {
+  disarmWatchdog();
   if (started) return router.render();
   started = true;
 

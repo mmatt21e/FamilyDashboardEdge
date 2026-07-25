@@ -207,6 +207,20 @@ Being explicit, so nothing here is a surprise:
   Drive folder already *is* the plain readable archive — photos as photos, PDFs
   as PDFs, openable without this app ever existing.
 
+## If it hangs on "Starting…"
+
+The app now diagnoses this itself: after 15 seconds it stops waiting, asks
+Google directly what is wrong, and shows you the answer with a link to the page
+that fixes it.
+
+The usual cause is that **Cloud Firestore was never created** in the Firebase
+project. Its SDK does not fail when the backend is missing — it opens a
+connection, gets a 503, and retries forever. Nothing throws and nothing appears
+in the browser console, which is why this used to be so hard to spot.
+
+Fix: Firebase console → Firestore Database → **Create database** → Production
+mode → then publish [`firestore.rules`](firestore.rules).
+
 ## Known limits
 
 - **iOS will not let a web app work in the background.** Data refreshes when you

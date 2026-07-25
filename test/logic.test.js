@@ -394,3 +394,91 @@ describe('config: optional push key', () => {
     assert.equal(result.vapidKey, 'BJ-key');
   });
 });
+
+describe('startup diagnosis', () => {
+  // The real body Google returned when Firestore had never been created in the
+  // project. This exact response left the app spinning forever with nothing in
+  // the console, so it is pinned here verbatim.
+  const SERVICE_DISABLED = JSON.stringify({
+    error: {
+      code: 403,
+      message: 'Cloud Firestore API has not been used in project familydashboardedge before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=familydashboardedge then retry.',
+      status: 'PERMISSION_DENIED',
+      details: [{ reason: 'SERVICE_DISABLED', domain: 'googleapis.com',
+                  metadata: { service: 'firestore.googleapis.com' } }],
+    },
+  });
+
+  test('recognises a database that was never created', async () => {
+    const { interpretFirestoreProbe } = await import('../src/diagnose.js');
+    const d = interpretFirestoreProbe({ status: 403, body: SERVICE_DISABLED }, 'familydashboardedge');
+
+    assert.equal(d.code, 'firestore-not-created');
+    assert.match(d.detail, /familydashboardedge/);
+    assert.match(d.fix, /Create database/i);
+    // Deep-links straight to the page that fixes it.
+    assert.equal(d.url, 'https://console.firebase.google.com/project/familydashboardedge/firestore');
+  });
+
+  // The crucial distinction: a permission 403 means the database is HEALTHY and
+  // the rules are doing their job. Confusing the two would tell people to
+  // recreate a database that already exists.
+  test('does not mistake a rules rejection for a missing database', async () => {
+    const { interpretFirestoreProbe } = await import('../src/diagnose.js');
+    const d = interpretFirestoreProbe({
+      status: 403,
+      body: JSON.stringify({ error: { code: 403, message: 'Missing or insufficient permissions.', status: 'PERMISSION_DENIED' } }),
+    }, 'p');
+    assert.equal(d.code, 'firestore-reachable');
+  });
+
+  test('treats 401 as reachable too', async () => {
+    const { interpretFirestoreProbe } = await import('../src/diagnose.js');
+    assert.equal(interpretFirestoreProbe({ status: 401, body: '' }, 'p').code, 'firestore-reachable');
+  });
+
+  test('reports a network failure as offline, not misconfiguration', async () => {
+    const { interpretFirestoreProbe } = await import('../src/diagnose.js');
+    const d = interpretFirestoreProbe({ networkError: 'Failed to fetch' }, 'p');
+    assert.equal(d.code, 'offline');
+    assert.match(d.fix, /VPN|ad blocker|online/i);
+  });
+
+  test('handles a 404 as a missing database', async () => {
+    const { interpretFirestoreProbe } = await import('../src/diagnose.js');
+    assert.equal(interpretFirestoreProbe({ status: 404, body: '' }, 'p').code, 'firestore-not-created');
+  });
+
+  test('always yields something showable, even for an unexpected status', async () => {
+    const { interpretFirestoreProbe } = await import('../src/diagnose.js');
+    const d = interpretFirestoreProbe({ status: 500, body: 'boom' }, 'p');
+    assert.ok(d.title && d.detail && d.fix);
+  });
+
+  test('probeFirestore reports the status without throwing', async () => {
+    const { probeFirestore } = await import('../src/diagnose.js');
+    const result = await probeFirestore('demo', {
+      fetchImpl: async () => ({ status: 403, text: async () => SERVICE_DISABLED }),
+    });
+    assert.equal(result.status, 403);
+    assert.match(result.body, /SERVICE_DISABLED/);
+  });
+
+  test('probeFirestore converts a thrown fetch into a network error', async () => {
+    const { probeFirestore } = await import('../src/diagnose.js');
+    const result = await probeFirestore('demo', {
+      fetchImpl: async () => { throw new Error('Failed to fetch'); },
+    });
+    assert.equal(result.networkError, 'Failed to fetch');
+  });
+
+  test('diagnoseStartup end to end on the real failure', async () => {
+    const { diagnoseStartup } = await import('../src/diagnose.js');
+    const d = await diagnoseStartup(
+      { firebase: { projectId: 'familydashboardedge' } },
+      { fetchImpl: async () => ({ status: 403, text: async () => SERVICE_DISABLED }) },
+    );
+    assert.equal(d.code, 'firestore-not-created');
+    assert.equal(d.projectId, 'familydashboardedge');
+  });
+});
