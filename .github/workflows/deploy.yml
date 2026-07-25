@@ -55,7 +55,21 @@ jobs:
     # exactly what happens on a repo whose first pushed branch was something
     # else. Comparing against the live default fixes it today and keeps working
     # after the default is switched, with no edit to this file.
-    if: github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request'
+    #
+    # TEMPORARY second clause. The github-pages *environment* keeps its own
+    # allowed-branches list, and it was created while claude/build-from-spec-4rap35
+    # was the repository default. Changing the default to main did NOT update
+    # that list, so deploys from main are refused before the job even starts
+    # (a failed job with no logs at all - the giveaway).
+    #
+    # TO REMOVE THIS: Settings -> Environments -> github-pages ->
+    # "Deployment branches and tags" -> add `main` (or switch it to
+    # "No restriction"). Then delete the second clause below and deploys run
+    # from the default branch alone, as intended.
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref_name == github.event.repository.default_branch ||
+       github.ref_name == 'claude/build-from-spec-4rap35')
     runs-on: ubuntu-latest
     environment:
       name: github-pages
