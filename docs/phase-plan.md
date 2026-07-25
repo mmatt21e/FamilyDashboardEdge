@@ -25,11 +25,24 @@ and export. They found three real bugs during development — see the
 Not built, and deliberately so: any feature module, any UI, and the APNs/FCM
 delivery workers.
 
-## The decision blocking Phase 1
+## Client framework — DECIDED: React Native
 
 Spec §6: *"Pick Flutter unless existing web/JS skill argues for React Native."*
-That turns on a fact about who is building this, which the spec does not record,
-so Phase 0 was built client-agnostic and the choice is still open.
+That turns on a fact about who is building this, which the spec does not record.
+Phase 0 was therefore built client-agnostic, and the call has now been made:
+**React Native**.
+
+Consequences that follow from it:
+
+- `packages/core` (TypeScript) is shared with the app rather than rewritten.
+- A web/PWA client (spec §6's optional secondary) becomes cheap *if* chosen
+  early, via react-native-web — retrofitting it later is not cheap.
+- `supabase-js` in React Native needs an AsyncStorage auth adapter and a URL
+  polyfill; without them session persistence silently fails on device.
+- Spec §7 is unaffected: background photo sync needs native iOS work whichever
+  framework wraps it.
+
+The comparison that led here is kept below as the record.
 
 |  | Flutter | React Native |
 |--|---------|--------------|
@@ -39,14 +52,9 @@ so Phase 0 was built client-agnostic and the choice is still open.
 | Web/PWA client (spec §6) | Flutter Web is heavy | ✅ same language |
 | Phase 2 background photo sync | platform channels either way | platform channels either way |
 
-Neither choice is affected by anything in Phase 0 — the database, RLS, RPCs and
+Neither choice was affected by anything in Phase 0 — the database, RLS, RPCs and
 export are all client-agnostic, and both frameworks talk to Supabase over the
-same API. Note that the framework choice does **not** ease spec §7: background
-photo sync needs native iOS work regardless.
-
-Worth knowing before deciding: the export worker is TypeScript, so React Native
-would share that code and Flutter would not. That is a small consideration
-against a large one — team skill dominates.
+same API.
 
 ## Phase 1 — Core v1
 

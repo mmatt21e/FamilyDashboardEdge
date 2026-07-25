@@ -14,7 +14,7 @@ security invariant proven by tests rather than asserted in prose.
 | Phase | Scope | State |
 |-------|-------|-------|
 | **0** | Auth/tenancy, roles, module registry, storage, notifications, audit, export | **Built and tested** |
-| 1 | Message board + calendar + document vault | Not started — [needs a client decision](docs/phase-plan.md#the-decision-blocking-phase-1) |
+| 1 | Message board + calendar + document vault | Not started — client framework [decided: React Native](docs/phase-plan.md#client-framework--decided-react-native) |
 | 2 | Owned iOS/Android background photo sync | Not started (spec §7 — its own hard project) |
 | 3 | Care, financial, history, connection modules | Catalogued, not built |
 | 4 | Store submission, billing, compliance review | Not started |
@@ -109,7 +109,6 @@ No UI, no feature modules, and no push delivery workers — the notification
 tables and fan-out exist, but nothing talks to APNs/FCM yet. The export worker
 builds the archive directory; zipping and uploading it is the remaining piece.
 
-The mobile framework is deliberately still open. Phase 0 is entirely
-client-agnostic, and spec §6's recommendation (Flutter unless existing web/JS
-skill argues for React Native) turns on a fact about the team, not the code.
-See [docs/phase-plan.md](docs/phase-plan.md#the-decision-blocking-phase-1).
+The mobile client is **React Native** (spec §6), but no app code exists yet.
+Phase 0 is entirely client-agnostic, so nothing in the schema changes as a
+result. See [docs/phase-plan.md](docs/phase-plan.md#client-framework--decided-react-native).
