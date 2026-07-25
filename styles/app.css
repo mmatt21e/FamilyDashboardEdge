@@ -540,3 +540,7 @@ a { color: var(--accent); }
   padding: .3rem .6rem; font-size: 16px;
 }
 .quick-tags__input::placeholder { color: rgba(255, 255, 255, .6); }
+
+/* A tile whose cached thumbnail expired, waiting for a fresh link from the
+   scan. Hidden rather than showing the browser's broken-image glyph. */
+.tile__img--pending { opacity: 0; }

@@ -78,9 +78,25 @@ async function ensureCatalog() {
  */
 let baseRecords = [];
 
+/**
+ * The current records by Drive id.
+ *
+ * The thumbnail fallback asks "is there a fresher copy of this record?" once
+ * per failed tile, and a screenful of expired links is two hundred of those at
+ * once. Against a ten-thousand-photo array that lookup must not be a scan.
+ */
+const recordIndex = new Map();
+
+function recordById(driveId) {
+  return recordIndex.get(driveId) ?? null;
+}
+
 /** Drive → catalog → corrections, narrowest source last. */
 function withEdits(records) {
-  return sortByTakenDesc(applyEdits(records, cachedEdits()));
+  const merged = sortByTakenDesc(applyEdits(records, cachedEdits()));
+  recordIndex.clear();
+  for (const record of merged) recordIndex.set(record.driveId, record);
+  return merged;
 }
 
 async function doLoad() {
@@ -88,17 +104,23 @@ async function doLoad() {
   const tag = (records) => applyCatalog(records, catalog?.lookup);
 
   // --- stage 1: the cached index -------------------------------------------
-  // Read in full, not the first page. A curated family library is thousands of
-  // photos, and a capped read shows a fraction of them as though that were all
-  // there is - which looks like working software and is not.
+  // Read in full, not the first page - a capped read shows a fraction of the
+  // library as though that were all there is. But painted from the FIRST page:
+  // the pages are newest-first, so the thousand photos a person actually
+  // scrolls first are on screen while pages two through ten are still on the
+  // wire, instead of the whole read gating the first pixel.
   if (!state.files.length) {
     try {
-      const cached = await fb.readAll('files', { orderBy: ['takenAt', 'desc'] });
-      if (cached.length) {
-        baseRecords = tag(cached);
+      const paint = (rows) => {
+        baseRecords = tag(rows);
         update({ files: withEdits(baseRecords), driveReady: true });
         window.dispatchEvent(new CustomEvent('fd:files-changed'));
-      }
+      };
+      const cached = await fb.readAll('files', {
+        orderBy: ['takenAt', 'desc'],
+        onPage: (rows, { page, done }) => { if (page === 1 && !done) paint(rows); },
+      });
+      if (cached.length) paint(cached);
     } catch {
       // No cache yet, or rules not published. Fall through to the Drive scan.
     }
@@ -346,29 +368,120 @@ function driveProblem(diagnosis, onRetry) {
 
 /**
  * Thumbnails come from Drive's own thumbnailLink where possible - it is already
- * resized, so a phone is not downloading full-size photos to draw a grid. When
- * it is missing the full file is fetched as a blob instead, which is slower but
- * always works.
+ * resized, so a phone is not downloading full-size photos to draw a grid.
+ *
+ * The interesting part is what happens when that link fails, because Drive
+ * thumbnail links EXPIRE after roughly an hour. The first paint comes from
+ * pointer records cached in Firestore, so on any open past that hour every
+ * cached link is dead at once. The old fallback answered each failure by
+ * downloading the ORIGINAL file - which for two hundred visible tiles of a
+ * phone-camera archive meant something like half a gigabyte of downloads, all
+ * racing each other, to draw a grid that the fresh Drive scan was about to
+ * replace anyway. That is what "photos are extremely slow" was.
+ *
+ * So the fallback now climbs a ladder instead of jumping off it:
+ *
+ *   1. a fresher record may already hold a working link - use it
+ *   2. while the scan is still running, wait for it; fresh links are seconds
+ *      away and every byte downloaded now is thrown away on redraw
+ *   3. only then fetch the file itself - capped in size, a few at a time, and
+ *      cached so it is never fetched twice
  */
 function thumbnail(record) {
   const img = el('img', {
     class: 'tile__img', loading: 'lazy', decoding: 'async',
     alt: record.name ?? 'Photo',
   });
+  img.addEventListener('load', () => img.classList.remove('tile__img--pending'));
 
   if (record.thumbnailUrl) {
     img.src = record.thumbnailUrl;
-    // Drive thumbnail links expire; fall back rather than showing a broken image.
-    img.addEventListener('error', () => { void loadBlobInto(img, record); }, { once: true });
+    img.addEventListener('error', () => { void thumbnailFallback(img, record); }, { once: true });
   } else {
-    void loadBlobInto(img, record);
+    void thumbnailFallback(img, record);
   }
   return img;
 }
 
+async function thumbnailFallback(img, record) {
+  img.classList.add('tile__img--pending');
+
+  // Rung 1: the reconcile may already have produced a live link.
+  const fresh = recordById(record.driveId);
+  if (fresh?.thumbnailUrl && fresh.thumbnailUrl !== img.src) {
+    img.addEventListener('error', () => { void loadBlobInto(img, fresh); }, { once: true });
+    img.src = fresh.thumbnailUrl;
+    return;
+  }
+
+  // Rung 2: fresh links are on their way. Waiting costs seconds; downloading
+  // originals costs hundreds of megabytes that the redraw throws away.
+  if (state.loadingFiles) {
+    window.addEventListener('fd:files-changed', () => { void thumbnailFallback(img, record); }, { once: true });
+    return;
+  }
+
+  // A breath before the expensive part. For a photo with no thumbnail at all
+  // this runs while the tile is still being BUILT - not yet attached - so an
+  // isConnected check any earlier concludes "gone" about a tile that is
+  // seconds from being on screen, and the photo stays blank forever. One
+  // macrotask later the grid is attached and the check means what it says:
+  // tiles discarded by a redraw are skipped, tiles on the page are fetched.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  if (!img.isConnected) return;
+
+  await loadBlobInto(img, fresh ?? record);
+}
+
+/**
+ * The last resort: the file itself, as a blob.
+ *
+ * Three guards, each of which was missing while this was the FIRST resort:
+ * files beyond a size cap get a placeholder rather than a download (a grid
+ * tile is not worth a 40MB original); only a few fetches run at once, so a
+ * screenful of failures does not open two hundred parallel downloads; and the
+ * result is cached by file id, so flicking between Photos and Memories does
+ * not download the same originals twice. The viewer shares the cache - a photo
+ * opened full-screen after its tile fell back costs nothing extra.
+ */
+const BLOB_MAX_BYTES = 10_000_000;
+const BLOB_CONCURRENCY = 4;
+
+const blobCache = new Map();
+const blobQueue = [];
+let blobActive = 0;
+
+function pumpBlobQueue() {
+  while (blobActive < BLOB_CONCURRENCY && blobQueue.length) {
+    const { task, resolve, reject } = blobQueue.shift();
+    blobActive += 1;
+    task().then(resolve, reject).finally(() => { blobActive -= 1; pumpBlobQueue(); });
+  }
+}
+
+function fetchCachedBlobUrl(driveId) {
+  if (!blobCache.has(driveId)) {
+    const queued = new Promise((resolve, reject) => {
+      blobQueue.push({
+        task: () => fetchFileBlobUrl(driveId, { clientId: state.config.googleClientId }),
+        resolve,
+        reject,
+      });
+      pumpBlobQueue();
+    });
+    // A failure is evicted so a retry can succeed; a success stays for the session.
+    blobCache.set(driveId, queued.catch((error) => { blobCache.delete(driveId); throw error; }));
+  }
+  return blobCache.get(driveId);
+}
+
 async function loadBlobInto(img, record) {
+  if (record.size && record.size > BLOB_MAX_BYTES) {
+    img.replaceWith(el('div', { class: 'tile__missing' }, '🖼️'));
+    return;
+  }
   try {
-    img.src = await fetchFileBlobUrl(record.driveId, { clientId: state.config.googleClientId });
+    img.src = await fetchCachedBlobUrl(record.driveId);
   } catch {
     img.replaceWith(el('div', { class: 'tile__missing' }, '🖼️'));
   }
@@ -554,11 +667,24 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
   );
 
   void (async () => {
-    try {
-      img.src = record.thumbnailUrl?.replace(/=s\d+/, '=s1600')
-        ?? await fetchFileBlobUrl(record.driveId, { clientId: state.config.googleClientId });
-    } catch {
-      img.replaceWith(el('p', { class: 'error-text' }, 'Could not open this file.'));
+    const fromBlob = async () => {
+      try {
+        // Shared with the grid's fallback: a photo whose tile already fell
+        // back to a blob opens full-screen for free.
+        img.src = await fetchCachedBlobUrl(record.driveId);
+      } catch {
+        img.replaceWith(el('p', { class: 'error-text' }, 'Could not open this file.'));
+      }
+    };
+
+    const large = record.thumbnailUrl?.replace(/=s\d+/, '=s1600');
+    if (large) {
+      // Thumbnail links expire; this one previously had no error handler at
+      // all, so an expired link meant a broken image and no way to tell why.
+      img.addEventListener('error', () => { void fromBlob(); }, { once: true });
+      img.src = large;
+    } else {
+      await fromBlob();
     }
   })();
 
@@ -937,7 +1063,17 @@ export async function photosView() {
   }
 
   const draw = () => {
-    if (state.loadingFiles && !state.files.length) {
+    if (state.fileError) {
+      return container.replaceChildren(driveProblem(state.fileError, async () => {
+        forgetDriveAccess();
+        await loadFiles({ force: true });
+        draw();
+      }));
+    }
+    // Checked after the error, or a failure before driveReady would sit behind
+    // a spinner forever. `driveReady` is part of the condition so a first-ever
+    // open shows "Loading" rather than a false "No photos yet" flash.
+    if ((state.loadingFiles || !state.driveReady) && !state.files.length) {
       // A first scan of a large archive takes a while, so it counts out loud
       // rather than showing a spinner that gives no sign of progress.
       const progress = state.scanProgress;
@@ -946,13 +1082,6 @@ export async function photosView() {
           ? `Reading the shared folder — ${progress.files.toLocaleString()} so far…`
           : 'Loading photos…',
       ));
-    }
-    if (state.fileError) {
-      return container.replaceChildren(driveProblem(state.fileError, async () => {
-        forgetDriveAccess();
-        await loadFiles({ force: true });
-        draw();
-      }));
     }
 
     container.replaceChildren(...children(
@@ -968,6 +1097,15 @@ export async function photosView() {
     ));
     drawResults();
   };
+
+  // Redrawn as data lands, not only when loadFiles returns. This is what makes
+  // the staged loading visible: the first Firestore page paints while the rest
+  // is still on the wire, and the Drive reconcile repaints with fresh links.
+  // Removed on teardown, or every past visit would redraw a dead node.
+  const onFilesChanged = () => { if (container.isConnected) draw(); };
+  window.addEventListener('fd:files-changed', onFilesChanged);
+  container.addEventListener('fd:teardown', () =>
+    window.removeEventListener('fd:files-changed', onFilesChanged), { once: true });
 
   draw();
   await loadFiles();

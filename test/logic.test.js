@@ -1963,3 +1963,64 @@ describe('version reporting', () => {
     assert.match(sw, /addEventListener\('message'/);
   });
 });
+
+describe('walking folders in parallel', () => {
+  /** A fake Drive that records how many requests are in flight at once. */
+  function trackingDrive(tree, delayMs = 5) {
+    let inFlight = 0;
+    let peak = 0;
+    const listPage = (id) => new Promise((resolve) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      setTimeout(() => {
+        inFlight -= 1;
+        resolve({ files: tree[id] ?? [], nextPageToken: null });
+      }, delayMs);
+    });
+    return { listPage, peakInFlight: () => peak };
+  }
+
+  const wideTree = (() => {
+    const tree = { root: [] };
+    for (let i = 0; i < 12; i += 1) {
+      tree.root.push(folder(`f${i}`, `f${i}`));
+      tree[`f${i}`] = [photo(`p${i}`, `p${i}.jpg`)];
+    }
+    return tree;
+  })();
+
+  // The scan's time is round trips; several folders at once is the entire
+  // optimisation. If this regresses to sequential, nothing fails visibly -
+  // the archive just quietly takes six times longer to appear.
+  test('actually reads several folders at once', async () => {
+    const drive = trackingDrive(wideTree);
+    const scan = await walkFolders('root', drive.listPage, { concurrency: 6 });
+    assert.equal(scan.items.length, 12, 'parallelism must not lose photos');
+    assert.ok(drive.peakInFlight() >= 4, `expected parallel reads, peak was ${drive.peakInFlight()}`);
+  });
+
+  test('concurrency of one is strictly sequential', async () => {
+    const drive = trackingDrive(wideTree);
+    await walkFolders('root', drive.listPage, { concurrency: 1 });
+    assert.equal(drive.peakInFlight(), 1);
+  });
+
+  test('parallel workers respect the folder limit', async () => {
+    const drive = trackingDrive(wideTree);
+    const scan = await walkFolders('root', drive.listPage, { concurrency: 6, maxFolders: 5 });
+    assert.equal(scan.truncated, true);
+    assert.ok(scan.items.length < 12);
+  });
+
+  test('parallel workers deduplicate a shared folder', async () => {
+    const tree = {
+      root: [folder('a', 'A'), folder('b', 'B')],
+      a: [folder('shared', 'Shared')],
+      b: [folder('shared', 'Shared')],
+      shared: [photo('p', 'p.jpg')],
+    };
+    const drive = trackingDrive(tree);
+    const scan = await walkFolders('root', drive.listPage, { concurrency: 6 });
+    assert.equal(scan.items.length, 1, 'the shared folder must still be read once');
+  });
+});

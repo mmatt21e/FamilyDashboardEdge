@@ -193,10 +193,14 @@ export async function queryDocs(path, options = {}) {
  * photos as though that were all of them. Paging on the ordered field with
  * `startAfter` is the only way to walk past that without holding a cursor open.
  *
+ * `onPage` fires after each page with everything read so far. The photo index
+ * uses it to paint the first thousand records immediately rather than making
+ * the person wait for page ten before seeing page one.
+ *
  * @param {string} path
- * @param {{orderBy?: [string,string], pageSize?: number, max?: number}} options
+ * @param {{orderBy?: [string,string], pageSize?: number, max?: number, onPage?: Function}} options
  */
-export async function readAll(path, { orderBy = null, pageSize = 1000, max = 50_000 } = {}) {
+export async function readAll(path, { orderBy = null, pageSize = 1000, max = 50_000, onPage = null } = {}) {
   const field = orderBy?.[0] ? orderBy[0] : dbMod.documentId();
   const direction = orderBy?.[1] ?? 'asc';
 
@@ -211,6 +215,7 @@ export async function readAll(path, { orderBy = null, pageSize = 1000, max = 50_
     if (snap.empty) break;
 
     for (const doc of snap.docs) out.push({ id: doc.id, ...doc.data() });
+    onPage?.(out.slice(), { page: Math.ceil(out.length / pageSize), done: snap.docs.length < pageSize });
     if (snap.docs.length < pageSize) break;
     cursor = snap.docs[snap.docs.length - 1];
   }
