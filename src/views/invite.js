@@ -81,7 +81,7 @@ export async function inviteCard() {
     card.replaceChildren(...children(
       el('h2', {}, 'Invite someone'),
       el('p', { class: 'muted small' },
-        'Sends a link that sets their phone up, walks them through adding it to their '
+        'Creates a link that sets their phone up, walks them through adding it to their '
         + 'home screen, and lets them sign in with their own Google account.'),
       inviteForm(draw),
       pending.length > 0 && el('div', { class: 'invite-list' },
@@ -102,6 +102,11 @@ function inviteForm(onChanged) {
     autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false',
   });
   const send = el('button', { class: 'btn btn--primary' }, 'Create invitation');
+  const note = el('p', { class: 'muted small' },
+    'This creates the invitation and hands you the message. The dashboard has no '
+    + 'server and no mail account, so it cannot post it for you — you send it from '
+    + 'your own email or messages, which is also why it arrives from an address they '
+    + 'recognise.');
   const output = el('div');
 
   send.addEventListener('click', async () => {
@@ -145,16 +150,22 @@ function inviteForm(onChanged) {
         + 'link can join once.'),
     ),
     el('div', { class: 'row' }, send),
+    note,
     output,
   );
 }
 
 /**
- * The link, ready to send.
+ * The invitation, ready to send.
  *
- * The Web Share sheet where there is one, because that puts the invitation into
- * the messaging app the family actually uses without anybody copying anything.
- * A copy button underneath for everywhere else.
+ * **The app does not send anything.** It is a static site with no server and no
+ * mail account, so there is nothing here that could put a message in somebody's
+ * inbox. What it does is hand you the message and open whichever app actually
+ * sends it - your mail client, or the phone's share sheet.
+ *
+ * That distinction was not clear enough before: the button said "Send it",
+ * which reads as a promise the app cannot keep, and an invitation that was
+ * never sent looks exactly like one that was lost.
  */
 function sharePanel(invitation, link) {
   const message = inviteMessage({
@@ -162,8 +173,20 @@ function sharePanel(invitation, link) {
     fromName: state.member?.name?.split(' ')[0] ?? '',
     link,
   });
+  const subject = `Join ${state.config?.familyName ?? 'our family'}’s photo dashboard`;
 
-  const share = el('button', { class: 'btn btn--primary' }, 'Send it');
+  // mailto opens the person's own mail app with everything filled in. It is the
+  // only way a site with no server can reach an inbox, and it has the pleasant
+  // side effect that the invitation comes from a real address the recipient
+  // recognises rather than a no-reply nobody trusts.
+  const email = invitation.email && el('a', {
+    class: 'btn btn--primary',
+    href: `mailto:${encodeURIComponent(invitation.email)}`
+      + `?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`,
+  }, `Email ${invitation.email}`);
+
+  const share = el('button', { class: invitation.email ? 'btn' : 'btn btn--primary' },
+    navigator.share ? 'Share…' : 'Copy the message');
   share.addEventListener('click', async () => {
     if (navigator.share) {
       try {
@@ -181,11 +204,17 @@ function sharePanel(invitation, link) {
 
   return el('div', { class: 'card card--inset' },
     el('h3', {}, invitation.name ? `Invitation for ${invitation.name}` : 'Invitation ready'),
+
+    el('p', { class: 'muted small' },
+      'The invitation is saved. Nothing has been sent yet — pick how to send it:'),
+
     el('textarea', { class: 'input input--code', rows: 5, readonly: true }, message),
-    el('div', { class: 'row' }, share, copyLink),
+    el('div', { class: 'row' }, ...children(email, share, copyLink)),
+
     el('p', { class: 'muted small' },
       `Works for ${DEFAULT_EXPIRY_DAYS} days`
-      + (invitation.email ? `, and only for ${invitation.email}.` : ', once, for whoever opens it.')),
+      + (invitation.email ? `, and only for ${invitation.email}.` : ', once, for whoever opens it.')
+      + ' It stays valid until it is used, so you can send it again if it goes astray.'),
   );
 }
 

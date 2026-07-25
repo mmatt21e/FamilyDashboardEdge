@@ -16,7 +16,9 @@ import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories
 import { provisionStructure } from '../folders.js';
 import { applyCatalog } from '../catalog.js';
 import { loadCatalog, loadEdits, cachedEdits, saveEdit, deleteEdit } from '../catalog-store.js';
-import { applyEdits, buildEdit, editedFields } from '../photo-edits.js';
+import {
+  applyEdits, buildEdit, editedFields, addPerson, removePerson, normalisePersonName,
+} from '../photo-edits.js';
 import { openTagSheet } from './photo-editor.js';
 import {
   emptyFilters, filterPhotos, buildFacets, describeFilters,
@@ -222,6 +224,46 @@ function refreshFromEdits() {
   window.dispatchEvent(new CustomEvent('fd:files-changed'));
 }
 
+/** How many one-tap names fit before the list stops being quicker than typing. */
+const QUICK_TAG_LIMIT = 8;
+
+/**
+ * Saves a new list of people for one photo.
+ *
+ * Shares the correction machinery with the full editor, so a quick tag is
+ * exactly as durable as one made there - stored as an override, and never
+ * undone by a later import.
+ *
+ * @returns {Promise<boolean>} whether it saved
+ */
+async function setPeople(record, people) {
+  const existing = cachedEdits().get(record.driveId) ?? null;
+  const shown = {
+    people: record.people ?? [],
+    event: record.event ?? null,
+    takenAt: record.takenAt ?? null,
+  };
+
+  const edit = buildEdit({
+    driveId: record.driveId,
+    name: record.name,
+    existing,
+    shown,
+    values: { ...shown, people },
+    by: state.user?.uid ?? null,
+  });
+  if (!edit) return false;
+
+  try {
+    await saveEdit(record.driveId, edit);
+    refreshFromEdits();
+    return true;
+  } catch (error) {
+    toast(error?.message ?? 'Could not save that tag', { error: true });
+    return false;
+  }
+}
+
 /**
  * Opens the tag editor for one photo and saves what comes back.
  *
@@ -354,6 +396,13 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
   const img = el('img', { class: 'viewer__img', alt: record.name });
   const meta = el('div', { class: 'viewer__meta' });
 
+  /** Saves and redraws in place, so tagging never leaves the photo. */
+  const afterSave = () => {
+    current = state.files.find((f) => f.driveId === current.driveId) ?? current;
+    drawMeta();
+    onChanged?.();
+  };
+
   const drawMeta = () => {
     const corrected = editedFields(cachedEdits().get(current.driveId));
 
@@ -366,16 +415,30 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
           current.owner,
         ].filter(Boolean).join(' · ')),
 
+      // Who is in it. The name filters to that person; the ✕ removes the tag.
       current.people?.length
         ? el('div', { class: 'chips chips--tight' }, current.people.map((person) => {
-            const chip = el('button', { class: 'chip chip--action', type: 'button' }, person);
-            chip.addEventListener('click', (event) => {
+            const name = el('button', { class: 'chip__name', type: 'button' }, person);
+            name.addEventListener('click', (event) => {
               event.stopPropagation();
               onFilterPerson?.(person);
             });
-            return chip;
+
+            const remove = el('button', {
+              class: 'chip__x chip__x--button', type: 'button', 'aria-label': `Remove ${person}`,
+            }, '✕');
+            remove.addEventListener('click', async (event) => {
+              event.stopPropagation();
+              remove.disabled = true;
+              if (await setPeople(current, removePerson(current.people, person))) afterSave();
+              else remove.disabled = false;
+            });
+
+            return el('span', { class: 'chip chip--action' }, name, remove);
           }))
         : el('div', { class: 'muted small' }, 'Nobody tagged'),
+
+      quickTags(),
 
       corrected.length > 0 && el('div', { class: 'muted small' },
         `Corrected by hand: ${corrected.map(fieldLabel).join(', ')}.`),
@@ -384,18 +447,97 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
     ));
   };
 
+  /**
+   * One tap to add a person.
+   *
+   * The names are whoever already appears across the library, commonest first,
+   * minus anyone already on this photo - which for a family album is almost
+   * always the person you were about to type. Going through the full editor for
+   * "that's Mindy too" was three taps and a keyboard, and the result was that
+   * nobody bothered.
+   *
+   * It saves on the tap. There is no Save button because there is nothing to
+   * confirm: a tag added by mistake is removed by the ✕ next to it.
+   */
+  function quickTags() {
+    const already = new Set((current.people ?? []).map((p) => p.toLowerCase()));
+    const { knownPeople } = knownTags();
+    const suggestions = knownPeople.filter((name) => !already.has(name.toLowerCase()));
+
+    const row = el('div', { class: 'chips chips--tight quick-tags' });
+
+    for (const person of suggestions.slice(0, QUICK_TAG_LIMIT)) {
+      const chip = el('button', { class: 'chip chip--add', type: 'button' },
+        el('span', { class: 'chip__plus', 'aria-hidden': 'true' }, '+'), person);
+
+      chip.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        chip.disabled = true;
+        if (await setPeople(current, addPerson(current.people, person))) afterSave();
+        else chip.disabled = false;
+      });
+      row.append(chip);
+    }
+
+    row.append(newPersonBox(suggestions));
+    return row;
+  }
+
+  /**
+   * For a name nobody has used yet.
+   *
+   * Collapsed to a chip until it is wanted, because a text field permanently
+   * open over the photo is in the way far more often than it is useful. The
+   * suggestion list carries every known name, not just the ones that fit as
+   * chips above.
+   */
+  function newPersonBox(suggestions) {
+    const listId = `quick-people-${current.driveId}`;
+    const input = el('input', {
+      class: 'input quick-tags__input', type: 'text', list: listId,
+      placeholder: 'Add someone…', autocomplete: 'off', hidden: true,
+      'aria-label': 'Add someone to this photo',
+    });
+    const options = el('datalist', { id: listId },
+      suggestions.map((name) => el('option', { value: name })));
+
+    const open = el('button', { class: 'chip chip--add', type: 'button' },
+      el('span', { class: 'chip__plus', 'aria-hidden': 'true' }, '+'), 'Someone else');
+
+    open.addEventListener('click', (event) => {
+      event.stopPropagation();
+      open.hidden = true;
+      input.hidden = false;
+      input.focus();
+    });
+
+    const commit = async () => {
+      const { knownPeople } = knownTags();
+      const name = normalisePersonName(input.value, knownPeople);
+      if (!name) { input.value = ''; return; }
+
+      input.disabled = true;
+      if (await setPeople(current, addPerson(current.people, name))) afterSave();
+      else { input.disabled = false; input.value = ''; }
+    };
+
+    input.addEventListener('keydown', (event) => {
+      event.stopPropagation();  // Escape here must not close the viewer
+      if (event.key === 'Enter') { event.preventDefault(); void commit(); }
+      if (event.key === 'Escape') { input.hidden = true; open.hidden = false; }
+    });
+    input.addEventListener('change', () => { if (input.value) void commit(); });
+
+    return el('span', { class: 'quick-tags__new' }, open, input, options);
+  }
+
   function editButton() {
-    const button = el('button', { class: 'btn btn--onDark', type: 'button' }, 'Edit tags');
+    const button = el('button', { class: 'btn btn--onDark', type: 'button' }, 'Date & event');
     button.addEventListener('click', async (event) => {
       // Without this the click reaches the backdrop handler and shuts the
       // viewer the instant the sheet opens.
       event.stopPropagation();
-      const saved = await onEdit(current);
-      if (!saved) return;
-
-      current = state.files.find((f) => f.driveId === current.driveId) ?? current;
-      drawMeta();
-      onChanged?.();
+      if (await onEdit(current)) afterSave();
     });
     return button;
   }

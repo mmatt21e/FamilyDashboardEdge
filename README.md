@@ -18,6 +18,7 @@ and it never handles anyone else's data.
 | **Photos** — everything in the shared Drive folder | Working |
 | **Filter photos** by who is in them, year, month, event, folder or text | Working |
 | **Tag and correct photos by hand** — people, event, date | Working |
+| One-tap tagging in the photo viewer | Working |
 | **Invite people from inside the app** | Working |
 | One-tap install on Android; guided Add to Home Screen on iPhone | Working (see below) |
 | **Memories** — on this day, a year / four years / ten years ago | Working |
@@ -103,8 +104,15 @@ folder ID.
 ### 7. Invite everyone else
 
 Settings → **Invite someone**. Give their name and, ideally, the email address
-of the Google account they will sign in with, then press **Send it** — the phone
-share sheet puts the message straight into your family chat.
+of the Google account they will sign in with, then **Create invitation**.
+
+**The app does not send it for you.** It is a static site with no server and no
+mail account, so nothing here can put a message in somebody's inbox. What it
+does is write the message and hand you three ways to send it: **Email** (opens
+your own mail app with everything filled in), **Share** (the phone's share
+sheet, into whichever chat the family uses), or **Copy**. The upside of doing it
+this way is that the invitation arrives from an address they recognise rather
+than a no-reply nobody trusts.
 
 The link does three things when they open it: fills in all the settings, walks
 them through adding the app to their home screen, and lets them sign in with
@@ -202,8 +210,15 @@ The import is a machine's opinion, and machines get it wrong — a face in shado
 missed, two siblings confused, whatever wrong date the camera had. So any photo
 can be corrected by anyone in the family:
 
-- **In the viewer.** Open a photo, press **Edit tags**. Add a person, tap a
-  name's ✕ to remove them, set or clear the date, put it in an event.
+- **In the viewer, one tap.** Open a photo and the names already used across
+  the library appear as chips underneath it, commonest first, minus anyone
+  already tagged — which for a family album is nearly always the person you were
+  about to type. Tap to add. Tap a tagged name's ✕ to remove. Both save
+  immediately; there is nothing to confirm, because a tag added by mistake comes
+  off with the ✕ beside it. **Someone else** opens a box for a name nobody has
+  used yet.
+- **Date & event** in the viewer opens the fuller editor, for correcting or
+  clearing a date and filing the photo under an event.
 - **When adding photos.** Choosing files brings up the same form before the
   upload starts, and the answers apply to the whole batch. This is the one
   moment when whoever is adding them definitely knows what they are.
