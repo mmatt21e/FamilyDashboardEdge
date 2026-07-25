@@ -33,6 +33,22 @@ export function clear(node) {
   return node;
 }
 
+/**
+ * Filters a child list the way `el` does, for use with the DOM's own
+ * `append` / `replaceChildren`.
+ *
+ * Those methods stringify anything that is not a Node, so the common
+ * conditional-child idiom
+ *
+ *     node.replaceChildren(a, someCondition && b)
+ *
+ * renders the literal text "false" on screen when the condition is false.
+ * Always wrap conditional children: `node.replaceChildren(...children(a, cond && b))`.
+ */
+export function children(...nodes) {
+  return nodes.flat(Infinity).filter((child) => child != null && child !== false);
+}
+
 /** Escapes text destined for innerHTML. */
 export function escapeHtml(text) {
   return String(text ?? '').replace(/[&<>"']/g, (ch) => ({

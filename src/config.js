@@ -110,38 +110,129 @@ export function validateConfig(input) {
 }
 
 /**
+ * Removes // and block comments without touching the inside of strings.
+ * String-aware because a URL like "https://x" contains "//" and must survive.
+ */
+function stripComments(src) {
+  let out = '';
+  let quote = null;
+
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    const next = src[i + 1];
+
+    if (quote) {
+      out += ch;
+      if (ch === '\\') { out += next ?? ''; i += 1; }
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; out += ch; continue; }
+    if (ch === '/' && next === '/') { while (i < src.length && src[i] !== '\n') i += 1; out += '\n'; continue; }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) i += 1;
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
+ * Returns the balanced {...} block beginning at `start`, or null if it never
+ * closes. Braces inside string literals are ignored.
+ */
+function braceBlock(src, start) {
+  let depth = 0;
+  let quote = null;
+
+  for (let i = start; i < src.length; i += 1) {
+    const ch = src[i];
+
+    if (quote) {
+      if (ch === '\\') i += 1;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+/** Strict JSON first, then the JS-object-literal form the console emits. */
+function parseObjectLiteral(block) {
+  try {
+    return JSON.parse(block);
+  } catch { /* not strict JSON; repair below */ }
+
+  try {
+    return JSON.parse(
+      block
+        .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')  // bare keys
+        .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')          // single quotes
+        .replace(/,\s*([}\]])/g, '$1'),                          // trailing commas
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Pulls a Firebase config out of whatever the user pasted.
  *
- * People copy this from the Firebase console in several shapes: bare JSON, a
- * JS object literal with unquoted keys, or the whole
- * `const firebaseConfig = {...};` snippet. Accepting only strict JSON would
- * reject the exact thing the console gives you, so parse all three.
+ * The console no longer shows a bare object. It gives you a whole file:
+ *
+ *     import { initializeApp } from "firebase/app";
+ *     import { getAnalytics } from "firebase/analytics";
+ *     const firebaseConfig = { apiKey: "...", ... };
+ *     const app = initializeApp(firebaseConfig);
+ *
+ * Taking "the first { to the last }" - which this used to do - starts at the
+ * brace in `import { initializeApp }` and produces garbage. That is a real
+ * failure people hit on their very first screen, so the config object is now
+ * located properly:
+ *
+ *   1. strip comments (string-aware, so URLs survive)
+ *   2. prefer the object assigned to `firebaseConfig`
+ *   3. otherwise try each balanced {...} block and take the first containing
+ *      an apiKey
+ *
+ * Returns null only when there is genuinely no Firebase config in the text.
  */
 export function parseFirebaseSnippet(text) {
   if (typeof text !== 'string' || !text.trim()) return null;
 
-  // Narrow to the outermost {...} so surrounding code is ignored.
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
-  let body = text.slice(start, end + 1);
+  const src = stripComments(text);
+  const starts = [];
 
-  try {
-    return JSON.parse(body);
-  } catch {
-    // Not strict JSON. Convert the JS-object-literal form: quote bare keys,
-    // convert single-quoted strings, and drop trailing commas.
-    try {
-      body = body
-        .replace(/\/\/[^\n\r]*/g, '')                       // line comments
-        .replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":') // bare keys
-        .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"')     // single quotes
-        .replace(/,\s*([}\]])/g, '$1');                     // trailing commas
-      return JSON.parse(body);
-    } catch {
-      return null;
-    }
+  const assigned = /(?:const|let|var)?\s*firebaseConfig\s*=\s*/.exec(src);
+  if (assigned) {
+    const at = src.indexOf('{', assigned.index + assigned[0].length - 1);
+    if (at !== -1) starts.push(at);
   }
+
+  // Fall back to every other opening brace, in order. Bounded so a huge paste
+  // cannot turn this into a pathological scan.
+  for (let i = 0; i < src.length && starts.length < 32; i += 1) {
+    if (src[i] === '{' && !starts.includes(i)) starts.push(i);
+  }
+
+  for (const start of starts) {
+    const block = braceBlock(src, start);
+    // An import's braces contain no apiKey, so they are skipped here.
+    if (!block || !/["']?apiKey["']?\s*:/.test(block)) continue;
+
+    const parsed = parseObjectLiteral(block);
+    if (parsed && typeof parsed.apiKey === 'string' && parsed.apiKey) return parsed;
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

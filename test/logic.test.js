@@ -78,6 +78,75 @@ describe('config', () => {
       assert.equal(parseFirebaseSnippet('hello there'), null);
       assert.equal(parseFirebaseSnippet(''), null);
     });
+
+    // THE REGRESSION THAT MATTERED. The Firebase console no longer shows a bare
+    // object - it hands you a whole file with import statements above the
+    // config. The old "first { to last }" extraction started at the brace in
+    // `import { initializeApp }` and produced garbage, so the very first screen
+    // rejected the exact thing the console told you to copy.
+    // Placeholder values here on purpose: real project identifiers belong in
+    // the app's own settings, never in this repository.
+    test('reads the full console file, imports and all', () => {
+      const pasted = `// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyExampleKeyNotReal000000000000000",
+  authDomain: "exampleproject.firebaseapp.com",
+  projectId: "exampleproject",
+  storageBucket: "exampleproject.firebasestorage.app",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:abcdef0123456789abcdef",
+  measurementId: "G-XXXXXXXXXX"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);`;
+
+      const parsed = parseFirebaseSnippet(pasted);
+      assert.ok(parsed, 'the console snippet must parse');
+      assert.equal(parsed.apiKey, 'AIzaSyExampleKeyNotReal000000000000000');
+      assert.equal(parsed.projectId, 'exampleproject');
+      assert.equal(parsed.authDomain, 'exampleproject.firebaseapp.com');
+      // appId is full of colons; the bare-key repair must not mangle it.
+      assert.equal(parsed.appId, '1:000000000000:web:abcdef0123456789abcdef');
+      // Nothing from the import lines should have leaked in.
+      assert.equal(parsed.initializeApp, undefined);
+    });
+
+    test('is not fooled by braces in import statements alone', () => {
+      assert.equal(parseFirebaseSnippet('import { initializeApp } from "firebase/app";'), null);
+    });
+
+    test('survives a URL in a comment (// is not always a comment)', () => {
+      const parsed = parseFirebaseSnippet(`
+        // see https://firebase.google.com/docs
+        const firebaseConfig = { apiKey: "k", authDomain: "https://x.example.com" };
+      `);
+      assert.equal(parsed.apiKey, 'k');
+      assert.equal(parsed.authDomain, 'https://x.example.com');
+    });
+
+    test('handles a block comment between the imports and the config', () => {
+      const parsed = parseFirebaseSnippet(`
+        import { initializeApp } from "firebase/app";
+        /* multi
+           line { brace } comment */
+        const firebaseConfig = { apiKey: "abc" };
+      `);
+      assert.equal(parsed.apiKey, 'abc');
+    });
+
+    test('falls back to any object containing an apiKey', () => {
+      const parsed = parseFirebaseSnippet('initializeApp({ apiKey: "zzz", projectId: "p" });');
+      assert.equal(parsed.apiKey, 'zzz');
+    });
   });
 });
 

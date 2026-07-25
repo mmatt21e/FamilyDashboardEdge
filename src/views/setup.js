@@ -5,7 +5,7 @@
  * One person fills it in, then shares a setup link so nobody else has to.
  */
 
-import { el, toast, spinner } from '../ui.js';
+import { el, toast, spinner, children } from '../ui.js';
 import {
   saveConfig, validateConfig, parseFirebaseSnippet,
   toSetupLink, loadConfig, clearConfig, normaliseConfig,
@@ -41,7 +41,10 @@ export function setupView({ onSaved, existing = null } = {}) {
   save.addEventListener('click', () => {
     const firebase = parseFirebaseSnippet(firebasePaste.value);
     if (!firebase) {
-      return showErrors(['Could not read the Firebase settings. Paste the whole block, including the curly braces.']);
+      return showErrors([
+        'Could not find your Firebase settings in that text. Copy everything the '
+        + 'Firebase console shows you — it needs to include apiKey and projectId.',
+      ]);
     }
 
     const candidate = normaliseConfig({
@@ -64,10 +67,12 @@ export function setupView({ onSaved, existing = null } = {}) {
   });
 
   function showErrors(messages) {
-    errorBox.replaceChildren(
+    // children() filters the conditional out. Passing `false` straight to
+    // replaceChildren stringifies it, printing "false" under the message.
+    errorBox.replaceChildren(...children(
       el('p', {}, messages.length === 1 ? messages[0] : 'Please check the following:'),
       messages.length > 1 && el('ul', {}, messages.map((m) => el('li', {}, m))),
-    );
+    ));
     errorBox.hidden = false;
     errorBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }

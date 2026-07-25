@@ -165,6 +165,62 @@ describe('setup', () => {
     await context.close();
   });
 
+  // The error box used to print a literal "false" under the message: the
+  // conditional-child idiom `replaceChildren(a, cond && b)` stringifies `false`
+  // when the condition fails. Visible on the very first screen a user sees.
+  test('shows no stray "false" under the error message', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+    await page.click('button:has-text("Save and continue")');
+    await page.waitForSelector('.form__errors:not([hidden])');
+
+    const text = await page.textContent('.form__errors');
+    assert.ok(!/\bfalse\b/i.test(text), `error box leaked a boolean: ${JSON.stringify(text)}`);
+    await context.close();
+  });
+
+  // End to end through the real UI with what the Firebase console actually
+  // gives you today - imports, comments, trailing init calls and all.
+  test('accepts the full Firebase console file pasted verbatim', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+
+    const consoleFile = [
+      '// Import the functions you need from the SDKs you need',
+      'import { initializeApp } from "firebase/app";',
+      'import { getAnalytics } from "firebase/analytics";',
+      '',
+      '// Your web app\'s Firebase configuration',
+      'const firebaseConfig = {',
+      '  apiKey: "AIzaSyExampleKeyNotReal000000000000000",',
+      '  authDomain: "exampleproject.firebaseapp.com",',
+      '  projectId: "exampleproject",',
+      '  storageBucket: "exampleproject.firebasestorage.app",',
+      '  messagingSenderId: "000000000000",',
+      '  appId: "1:000000000000:web:abcdef0123456789abcdef",',
+      '  measurementId: "G-XXXXXXXXXX"',
+      '};',
+      '',
+      '// Initialize Firebase',
+      'const app = initializeApp(firebaseConfig);',
+      'const analytics = getAnalytics(app);',
+    ].join('\n');
+
+    await page.fill('input[placeholder="The Smiths"]', 'The Testers');
+    await page.fill('textarea', consoleFile);
+    await page.fill('input[placeholder*="googleusercontent"]', '123.apps.googleusercontent.com');
+    await page.fill('input[placeholder*="web address"]', 'folder-abc');
+    await page.click('button:has-text("Save and continue")');
+
+    await page.waitForFunction(() => localStorage.getItem('fd.config.v1') !== null, { timeout: 5000 });
+    const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('fd.config.v1')));
+
+    assert.equal(saved.firebase.projectId, 'exampleproject');
+    assert.equal(saved.firebase.appId, '1:000000000000:web:abcdef0123456789abcdef');
+    assert.equal(saved.firebase.apiKey, 'AIzaSyExampleKeyNotReal000000000000000');
+    await context.close();
+  });
+
   test('rejects a Google client ID that is not one', async () => {
     const { page, context } = await openApp();
     await page.waitForSelector('.view--setup');

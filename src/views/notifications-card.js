@@ -11,7 +11,7 @@
  *     are saved for later and the card says so
  */
 
-import { el, toast } from '../ui.js';
+import { el, toast, children } from '../ui.js';
 import {
   categories, capability, requestPermission, deliveryConfigured,
   loadPrefs, savePrefs, registerDevice,
@@ -40,13 +40,14 @@ export async function notificationsCard() {
       }
     });
 
-    card.append(
+    // children() filters the conditional; append would stringify `false`.
+    card.append(...children(
       el('p', { class: 'muted' },
         permission === 'denied'
           ? 'Notifications are blocked for this app. You can allow them again in your browser settings for this site.'
           : 'Get told when something new is posted.'),
       permission !== 'denied' && ask,
-    );
+    ));
     return card;
   }
 
