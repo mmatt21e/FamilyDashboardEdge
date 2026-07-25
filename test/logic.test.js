@@ -293,3 +293,35 @@ describe('drive files', () => {
     assert.equal(formatSize(5 * 1024 * 1024), '5.0 MB');
   });
 });
+
+describe('notification preferences', () => {
+  // These import lazily because notifications.js reaches for browser globals
+  // that do not exist under node; only the pure parts are exercised here.
+  test('categories only cover features that are actually built', async () => {
+    const { categories } = await import('../src/notifications.js');
+    const { getModule } = await import('../src/modules.js');
+    for (const category of categories()) {
+      assert.equal(getModule(category.key)?.status, 'ready',
+        `${category.key} is offered as a notification category but is not built`);
+    }
+  });
+
+  test('everything is opted in by default', async () => {
+    const { defaultPrefs, categories } = await import('../src/notifications.js');
+    const prefs = defaultPrefs();
+    assert.equal(Object.keys(prefs).length, categories().length);
+    assert.ok(Object.values(prefs).every(Boolean));
+  });
+});
+
+describe('config: optional push key', () => {
+  test('vapidKey is optional and does not block setup', () => {
+    assert.deepEqual(validateConfig(validConfig), []);
+    assert.equal(normaliseConfig(validConfig).vapidKey, '');
+  });
+
+  test('vapidKey is kept when supplied', () => {
+    const result = normaliseConfig({ ...validConfig, vapidKey: 'BJ-key' });
+    assert.equal(result.vapidKey, 'BJ-key');
+  });
+});

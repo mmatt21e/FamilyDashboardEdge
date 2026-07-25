@@ -6,7 +6,7 @@
  * refresh actually matters.
  */
 
-import { el, spinner, emptyState, toast, relativeTime, formatDate, formatTime } from '../ui.js';
+import { el, spinner, emptyState, toast, relativeTime, formatDate } from '../ui.js';
 import { state } from '../store.js';
 import * as fb from '../firebase.js';
 

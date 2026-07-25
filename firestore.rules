@@ -73,6 +73,18 @@ service cloud.firestore {
       allow read, write: if isFamily();
     }
 
+    // Per-person notification preferences. Yours alone - nobody else in the
+    // family needs to see or change what you have opted into.
+    match /notification_prefs/{uid} {
+      allow read, write: if isFamily() && request.auth.uid == uid;
+    }
+
+    // Registered devices for push. Written by the owning member only.
+    match /devices/{id} {
+      allow read: if isFamily();
+      allow write: if isFamily() && request.resource.data.uid == request.auth.uid;
+    }
+
     // Generic list structure shared by shopping list, bucket list, watchlist,
     // reading list, playlists and wish lists.
     match /lists/{id} {

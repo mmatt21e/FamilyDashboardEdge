@@ -8,6 +8,7 @@
 
 import { el, spinner, emptyState, errorState, toast, formatDate } from '../ui.js';
 import { state, update, filesAreStale } from '../store.js';
+import * as fb from '../firebase.js';
 import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from '../drive.js';
 import { toPointerRecord, sortByTakenDesc, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
@@ -15,14 +16,34 @@ import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories
 /**
  * Loads the shared folder into the store.
  *
- * Drive is the source of truth for what exists, because PhotoSync adds files
- * without this app knowing. Firestore pointer records are a cache and a place
- * to hang captions, not the inventory.
+ * Two stages, because the brief asks for the open-moment to feel instant and
+ * listing Drive takes seconds on a phone:
+ *
+ *   1. paint immediately from the pointer records in Firestore
+ *   2. then scan Drive and reconcile
+ *
+ * Drive stays the source of truth for what exists - PhotoSync adds files
+ * without this app knowing - but Firestore is what makes opening the app fast,
+ * and it is where captions and comments will hang off a photo later.
  */
 export async function loadFiles({ force = false } = {}) {
   if (state.loadingFiles) return;
   if (!force && !filesAreStale() && state.files.length) return;
 
+  // --- stage 1: the cached index -------------------------------------------
+  if (!state.files.length) {
+    try {
+      const cached = await fb.queryDocs('files', { orderBy: ['takenAt', 'desc'], limit: 500 });
+      if (cached.length) {
+        update({ files: sortByTakenDesc(cached), driveReady: true });
+        window.dispatchEvent(new CustomEvent('fd:files-changed'));
+      }
+    } catch {
+      // No cache yet, or rules not published. Fall through to the Drive scan.
+    }
+  }
+
+  // --- stage 2: reconcile against Drive ------------------------------------
   update({ loadingFiles: true, fileError: null });
   try {
     const raw = await listSharedMedia(state.config.driveFolderId, {
@@ -38,8 +59,37 @@ export async function loadFiles({ force = false } = {}) {
       driveReady: true,
       loadingFiles: false,
     });
+
+    void persistNewPointers(records);
   } catch (error) {
     update({ loadingFiles: false, fileError: error?.message ?? 'Could not read the shared folder.' });
+  }
+}
+
+/**
+ * Writes pointer records for files Firestore has not seen before.
+ *
+ * Only *new* ones, and capped per run. A first sync can drop tens of thousands
+ * of photos into the folder, and writing all of them would burn through the
+ * Firestore free tier in one go for no benefit - the grid is already rendered
+ * from the Drive scan by this point. The backlog fills in over subsequent
+ * opens, and nothing breaks while it does.
+ */
+const MAX_WRITES_PER_RUN = 200;
+
+async function persistNewPointers(records) {
+  try {
+    const existing = await fb.queryDocs('files', { limit: 1000 });
+    const known = new Set(existing.map((r) => r.driveId ?? r.id));
+
+    const fresh = records.filter((r) => !known.has(r.driveId)).slice(0, MAX_WRITES_PER_RUN);
+    for (const record of fresh) {
+      // Keyed on the Drive id so a re-scan updates in place rather than
+      // creating a second record for the same photo.
+      await fb.setDoc('files', record.driveId, record);
+    }
+  } catch {
+    // Never let a caching failure break the photo grid; it is only an index.
   }
 }
 

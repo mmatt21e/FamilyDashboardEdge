@@ -77,6 +77,9 @@ export function normaliseConfig(input) {
     },
     googleClientId: str(input?.googleClientId),
     driveFolderId: str(input?.driveFolderId),
+    // Optional. Only needed if the family sets up a sender for push
+    // notifications; everything else works without it.
+    vapidKey: str(input?.vapidKey),
   };
 }
 

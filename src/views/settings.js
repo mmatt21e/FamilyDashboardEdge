@@ -3,15 +3,17 @@
  */
 
 import { el, toast, getTheme, applyTheme } from '../ui.js';
-import { groupedModules, getModule } from '../modules.js';
+import { groupedModules } from '../modules.js';
 import { state, setModuleEnabled } from '../store.js';
 import { shareSetupCard, resetConfigButton } from './setup.js';
 import * as fb from '../firebase.js';
+import { notificationsCard } from './notifications-card.js';
 
 export async function settingsView() {
   return el('div', { class: 'view' },
     el('header', { class: 'view__header' }, el('h1', {}, 'Settings')),
     appearanceCard(),
+    await notificationsCard(),
     modulesCard(),
     shareSetupCard(state.config),
     accountCard(),

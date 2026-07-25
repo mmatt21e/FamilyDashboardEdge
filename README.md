@@ -20,6 +20,7 @@ and it never handles anyone else's data.
 | **Calendar** — visits, trips, when everyone is together | Working |
 | **Message board** — short updates and photos | Working |
 | Settings with on/off switches for every feature | Working |
+| Per-person notification preferences | Preferences work; **sending needs a Cloud Function** |
 | Dark mode | Working |
 | Setup checklist with PhotoSync walkthrough | Working |
 | The other ~35 features from the plan | Listed in Settings as "Coming soon" |
@@ -187,6 +188,24 @@ features (shopping, bucket list, watchlist, wish lists) share one generic
 list/item structure rather than each getting their own.
 
 ---
+
+## Not built yet
+
+Being explicit, so nothing here is a surprise:
+
+- **Sending notifications.** Preferences, permission and device registration all
+  work and are stored per person. Nothing can actually *send* a push, because a
+  static site has no server — that needs a Cloud Function on your own Firebase
+  project, triggered by new documents in `messages` or `calendar_events`. The
+  Settings screen says so rather than showing a switch that does nothing.
+- **The other ~35 features.** Listed in Settings as "Coming soon" and not
+  switchable. The registry is ready for them.
+- **The generic list structure.** `lists` / `list_items` are in the security
+  rules and the design is settled, but nothing uses them until the first
+  list-type feature (shopping list) is built.
+- **No explicit export button.** Not needed for the inheritance goal: the shared
+  Drive folder already *is* the plain readable archive — photos as photos, PDFs
+  as PDFs, openable without this app ever existing.
 
 ## Known limits
 
