@@ -3,8 +3,13 @@
  *
  * Firestore cannot query "same month and day, any year" - there is no way to
  * express that against a timestamp field. So every file pointer record carries
- * a `dayKey` ("MM-DD") written at the time it is saved, and the memory feed is
- * a plain equality query on that. This is the reason the field exists.
+ * a `dayKey` ("MM-DD") written at the time it is saved, and the feed matches on
+ * that instead. This is the reason the field exists.
+ *
+ * The matching currently happens in the browser, over the listing already in
+ * memory - for a family library that is faster than a round trip. The field is
+ * shaped for a server-side equality query so that stays available if the
+ * library ever outgrows loading in one go.
  *
  * Everything here is pure so it can be tested without a browser or a database.
  */

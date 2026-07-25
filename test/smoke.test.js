@@ -32,6 +32,11 @@ const TYPES = {
 
 let server, browser, origin;
 
+// GitHub Pages serves a project site under /<repo>/, not at the domain root.
+// Every relative path, the manifest scope and the service worker registration
+// have to survive that, so the suite exercises it rather than assuming.
+const BASE = '/family-dashboard';
+
 /**
  * Finds an already-installed Chromium, newest build first.
  * Returns undefined so Playwright falls back to its own copy if none is found.
@@ -55,7 +60,9 @@ function findLocalChromium() {
 before(async () => {
   server = createServer(async (req, res) => {
     try {
-      const path = decodeURIComponent(req.url.split('?')[0]);
+      let path = decodeURIComponent(req.url.split('?')[0]);
+      // Accept both the root and the project-site prefix from one server.
+      if (path.startsWith(BASE)) path = path.slice(BASE.length) || '/';
       const rel = normalize(path === '/' ? '/index.html' : path).replace(/^(\.\.[/\\])+/, '');
       const file = join(ROOT, rel);
       const body = await readFile(file);
@@ -85,7 +92,7 @@ after(async () => {
 });
 
 /** Fresh context each time, so localStorage never leaks between tests. */
-async function openApp({ route = '' } = {}) {
+async function openApp({ route = '', base = '' } = {}) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },   // iPhone-ish, since this is mobile-first
   });
@@ -95,7 +102,7 @@ async function openApp({ route = '' } = {}) {
   page.on('console', (msg) => { if (msg.type() === 'error') errors.push(msg.text()); });
   page.on('pageerror', (error) => errors.push(String(error)));
 
-  await page.goto(`${origin}/${route}`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${origin}${base}/${route}`, { waitUntil: 'domcontentloaded' });
   return { page, context, errors };
 }
 
@@ -219,5 +226,51 @@ describe('setup', () => {
     const { page, context } = await openApp({ route: '#setup=not-valid-base64!!' });
     await page.waitForSelector('.view--setup', { timeout: 10_000 });
     await context.close();
+  });
+});
+
+
+describe('deployed under a GitHub Pages subpath', () => {
+  // The app is served from https://user.github.io/<repo>/ in reality. A path
+  // that only works at the domain root would fail on the very first deploy,
+  // which is an expensive way to find out.
+  test('boots from /<repo>/ just as it does from the root', async () => {
+    const { page, context, errors } = await openApp({ route: '', base: BASE });
+    await page.waitForSelector('.view--setup', { timeout: 10_000 });
+    assert.match(await page.textContent('h1'), /Set up your family dashboard/i);
+    assert.deepEqual(errors, [], `console errors under subpath: ${errors.join(' | ')}`);
+    await context.close();
+  });
+
+  test('loads its stylesheet and modules from the subpath', async () => {
+    const { page, context } = await openApp({ route: '', base: BASE });
+    await page.waitForSelector('.view--setup');
+
+    // If the CSS 404'd the card would be unstyled; check a value that only
+    // comes from the stylesheet.
+    const radius = await page.evaluate(() =>
+      getComputedStyle(document.querySelector('.card')).borderRadius);
+    assert.ok(radius && radius !== '0px', `stylesheet did not load (radius: ${radius})`);
+    await context.close();
+  });
+
+  test('registers the service worker at the subpath scope', async () => {
+    const { page, context } = await openApp({ route: '', base: BASE });
+    await page.waitForSelector('.view--setup');
+
+    const scope = await page.evaluate(async () => {
+      const reg = await navigator.serviceWorker.getRegistration();
+      return reg?.scope ?? null;
+    });
+    assert.ok(scope, 'no service worker registered');
+    assert.ok(scope.endsWith(`${BASE}/`), `scope should cover the project path, got ${scope}`);
+    await context.close();
+  });
+
+  test('manifest start_url and scope are relative, not root-anchored', async () => {
+    const manifest = await (await fetch(`${origin}${BASE}/manifest.webmanifest`)).json();
+    // A leading "/" here would send the installed app to the wrong place.
+    assert.ok(!manifest.start_url.startsWith('/'), `start_url must be relative: ${manifest.start_url}`);
+    assert.ok(!manifest.scope.startsWith('/'), `scope must be relative: ${manifest.scope}`);
   });
 });
