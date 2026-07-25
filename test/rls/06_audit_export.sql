@@ -130,8 +130,13 @@ select test.ok('export', 'the snapshot includes files',
 select test.ok('export', 'the snapshot includes module settings',
   (select s->'data'->'family_modules' from _snap) is not null);
 
-select test.ok('export', 'the snapshot includes member profiles',
-  (select jsonb_array_length(s->'data'->'profiles') from _snap) = 5);
+-- One profile per member. Derived from the snapshot itself rather than
+-- hardcoded, so earlier suites adding or removing members cannot make this
+-- assertion stale (and quietly wrong) instead of meaningful.
+select test.ok('export', 'the snapshot includes one profile per member',
+  (select jsonb_array_length(s->'data'->'profiles') from _snap)
+  = (select count(distinct m->>'user_id')::int
+       from _snap, jsonb_array_elements(s->'data'->'family_members') m));
 
 -- Invitation token hashes must never leave the building.
 select test.ok('export', 'the snapshot excludes invitation tokens',

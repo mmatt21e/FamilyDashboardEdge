@@ -18,7 +18,9 @@ insert into auth.users (id, email) values
   ('a0000000-0000-4000-8000-000000000005', 'erin@example.com'),    -- F2 owner
   ('a0000000-0000-4000-8000-000000000006', 'frank@example.com'),   -- adult in BOTH
   ('a0000000-0000-4000-8000-000000000007', 'grace@example.com'),   -- no family at all
-  ('a0000000-0000-4000-8000-000000000008', 'henry@example.com');   -- co-owner of F3
+  ('a0000000-0000-4000-8000-000000000008', 'henry@example.com'),   -- co-owner of F3
+  ('a0000000-0000-4000-8000-000000000009', 'ivy@example.com'),     -- no family; join-request tests
+  ('a0000000-0000-4000-8000-00000000000a', 'jack@example.com');    -- no family; declined-request tests
 
 -- --- families ---------------------------------------------------------------
 -- created_by fires on_family_created, which installs the creator as owner.

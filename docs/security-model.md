@@ -106,10 +106,28 @@ Invitations are the only route from outside a tenant to inside it.
 - Only the SHA-256 hash of the token is stored, so a database leak yields no
   working invitations. The plaintext is returned exactly once, at creation.
 - Tokens are 256 bits, single-use, and expire (14 days by default).
-- **The invited email must match the redeemer's own address.** A forwarded link
-  is not enough to join a family holding medical and legal records. If a
-  relative signs up with a different address, an admin re-issues to the address
-  they used.
+- **The invited email must match the redeemer's own address**, or the join goes
+  to a **pending** state that a family admin must approve. A forwarded link is
+  never enough on its own to enter a family holding medical and legal records.
+
+  The pending path exists because a hard rejection breaks a case that will be
+  common: Sign in with Apple's "Hide My Email" gives the user an
+  `@privaterelay.appleid.com` address, so a grandparent invited at
+  `grandma@gmail.com` would be refused — exactly the member spec §9 says must
+  be able to get in unaided. An admin still decides who joins; the invitee just
+  gets a recovery path.
+
+  A pending member holds **no access at all**. Every access helper filters on
+  `status = 'active'`, so a pending row grants nothing by construction rather
+  than by a rule someone has to remember.
+
+- **A pending request does not consume the invitation.** If it did, anyone
+  holding a forwarded link could burn the token by triggering a pending request
+  and lock the genuine invitee out of their own invitation. The token stays live
+  until an *active* membership results from it; the pending row records which
+  invitation it came from, and approval consumes it at that point. Approval also
+  re-checks that the invitation is still valid, so revoking one actually stops a
+  join that was requested before the revocation.
 - Every failure mode returns one generic message, so the endpoint cannot be used
   to probe which tokens exist.
 - Invitees cannot read `family_invitations`; redemption matches on the token

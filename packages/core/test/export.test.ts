@@ -88,7 +88,6 @@ describe('exportFamily', () => {
     // --- structured data ---
     assert.ok(result.tables.family_members > 0, 'members exported');
     assert.ok(result.tables.files > 0, 'file pointers exported');
-    assert.equal(result.tables.profiles, 5, 'member profiles exported');
 
     const members = JSON.parse(
       await readFile(join(dir, 'data', 'family_members.json'), 'utf8'),
@@ -98,6 +97,12 @@ describe('exportFamily', () => {
       members.every((m: any) => m.family_id === SMITH),
       'export contains only this family',
     );
+
+    // One profile per member, derived rather than hardcoded so the RLS suite
+    // adding or removing fixture members cannot make this assertion stale.
+    const memberIds = new Set(members.map((m: any) => m.user_id));
+    assert.equal(result.tables.profiles, memberIds.size,
+      'one profile exported per member');
 
     // CSV is written alongside JSON so a non-technical relative can open it.
     // Column order comes from jsonb, which sorts keys by length then

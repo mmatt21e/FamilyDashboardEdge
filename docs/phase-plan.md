@@ -44,6 +44,36 @@ Consequences that follow from it:
 
 The comparison that led here is kept below as the record.
 
+## Other decisions taken
+
+| Decision | Choice | Consequence |
+|----------|--------|-------------|
+| RN tooling | **Expo, dev builds** (not Expo Go) | EAS Build covers signing and store submission (spec §9's recurring cost); OTA updates ship JS fixes without a review cycle; native modules still available via the Expo Modules API for Phase 2 |
+| v1 module set | **Message board + calendar + chores/lists** | Spec §8's stated alternative. Keeps the document vault — and the envelope-encryption work it needs — out of the v1 critical path |
+| Mismatched invitation email | **Pending join, admin approves** | Implemented in `0014_join_requests.sql`. Handles Apple's Hide My Email without weakening who decides membership |
+| Web/PWA client | **Eventually, planned for now** | Pick react-native-web-compatible component libraries from the first commit; retrofitting is the expensive path |
+
+### Still open
+
+**Supabase region / data residency.** Set at project creation; moving later
+means a migration with downtime. Depends on where customers are — EU customers
+plus medical data means an EU region and GDPR obligations from day one. Spec §9
+wants legal review here; the region is the irreversible part.
+
+### Why the vault is not in v1
+
+The document vault is `sensitive` tier and is the module that most needs the
+application-level encryption listed under
+[known gaps](security-model.md#known-gaps). That work is not just key
+management — it collides with the export guarantee. If the vault is encrypted at
+rest, the export worker must decrypt on the way out, or "a relative can open
+this years from now" stops being true. Worth designing deliberately rather than
+under v1 pressure.
+
+Chores and lists also earn their place on merit: they get *daily* use, which is
+what spec §8's "genuinely working and loved at home" actually requires. A vault
+gets opened twice a year.
+
 |  | Flutter | React Native |
 |--|---------|--------------|
 | Spec's default | ✅ recommended | conditional |

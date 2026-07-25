@@ -14,7 +14,7 @@ security invariant proven by tests rather than asserted in prose.
 | Phase | Scope | State |
 |-------|-------|-------|
 | **0** | Auth/tenancy, roles, module registry, storage, notifications, audit, export | **Built and tested** |
-| 1 | Message board + calendar + document vault | Not started — client framework [decided: React Native](docs/phase-plan.md#client-framework--decided-react-native) |
+| 1 | Message board + calendar + chores/lists | Not started — [decisions taken](docs/phase-plan.md#other-decisions-taken): React Native + Expo dev builds |
 | 2 | Owned iOS/Android background photo sync | Not started (spec §7 — its own hard project) |
 | 3 | Care, financial, history, connection modules | Catalogued, not built |
 | 4 | Store submission, billing, compliance review | Not started |
@@ -29,10 +29,10 @@ features are not. `status` distinguishes `available` from `planned`.
 > is an active member of.
 
 This is enforced in the database, not in a client or an API layer, so it holds
-regardless of what talks to it. It is covered by **149 assertions** that run
+regardless of what talks to it. It is covered by **168 assertions** that run
 against a real Postgres cluster — see [docs/security-model.md](docs/security-model.md).
 
-Writing the tests was worth it: they caught three real defects during
+Writing the tests was worth it: they caught four real defects during
 development, including one where the access helpers returned `NULL` instead of
 `false` for non-members. `NULL` is filtered as false inside an RLS policy, so
 every policy looked correct — but `if not app.is_family_admin(...)` does not
@@ -52,7 +52,7 @@ initdb -D /tmp/fd-pg -U postgres --auth=trust
 pg_ctl -D /tmp/fd-pg -o "-p 55432" -l /tmp/fd-pg/server.log start
 
 npm install
-npm test          # migrations + 149 RLS assertions + export worker tests
+npm test          # migrations + 168 RLS assertions + export worker tests
 ```
 
 Individually:
@@ -67,7 +67,7 @@ npm run test:core   # export worker
 
 ```
 supabase/
-  migrations/       0001..0013, applied in order; the product schema
+  migrations/       0001..0014, applied in order; the product schema
   local/            local-only shim; NEVER applied to a real Supabase project
 packages/core/
   src/export.ts     export worker: snapshot + files -> plain readable archive
