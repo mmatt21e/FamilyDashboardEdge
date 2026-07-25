@@ -33,15 +33,31 @@ let tokenClient = null;
 let accessToken = null;
 let tokenExpiry = 0;
 
+const GIS_LOAD_TIMEOUT_MS = 15_000;
+const TOKEN_TIMEOUT_MS = 20_000;
+
 function loadGis() {
   if (gisLoaded) return gisLoaded;
   gisLoaded = new Promise((resolve, reject) => {
     if (window.google?.accounts?.oauth2) return resolve();
+
     const script = document.createElement('script');
     script.src = GIS_SRC;
     script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Could not load Google sign-in.'));
+
+    // A blocked or unreachable accounts.google.com leaves onload/onerror
+    // silent, so without this the whole photo view waits forever.
+    const timer = setTimeout(() => {
+      gisLoaded = null;
+      reject(new Error('token_timeout: Google sign-in did not load. It may be blocked by an ad blocker, VPN or network filter.'));
+    }, GIS_LOAD_TIMEOUT_MS);
+
+    script.onload = () => { clearTimeout(timer); resolve(); };
+    script.onerror = () => {
+      clearTimeout(timer);
+      gisLoaded = null;
+      reject(new Error('token_timeout: Could not load Google sign-in.'));
+    };
     document.head.appendChild(script);
   });
   return gisLoaded;
@@ -66,17 +82,52 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
     });
   }
 
+  // THE HANG THIS FIXES.
+  //
+  // requestAccessToken() is fire-and-forget: it invokes a callback rather than
+  // returning a promise. When Google declines outright - the origin is not in
+  // the OAuth client's Authorised JavaScript origins, or the signed-in account
+  // is not a test user on an unpublished app - NEITHER callback fires. The
+  // promise never settles, so the Photos view sat on "Loading photos..."
+  // indefinitely with no error anywhere.
+  //
+  // So: wire error_callback as well as callback, and put a hard timeout over
+  // both. Whatever happens, this promise settles.
   return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+
+    const timer = setTimeout(() => {
+      finish(reject, new Error(
+        'no_token: Google never answered the request for Drive access. Usually the site’s origin is missing from the OAuth client, or this account is not on the test-user list.',
+      ));
+    }, TOKEN_TIMEOUT_MS);
+
     tokenClient.callback = (response) => {
-      if (response?.error) return reject(new Error(response.error));
+      if (response?.error) {
+        return finish(reject, new Error(`${response.error}: ${response.error_description ?? 'Google refused the request.'}`));
+      }
       accessToken = response.access_token;
       tokenExpiry = Date.now() + Number(response.expires_in ?? 3600) * 1000;
-      resolve(accessToken);
+      finish(resolve, accessToken);
     };
+
+    // Fires for popup_failed_to_open, popup_closed and similar. Without it
+    // those cases just hang.
+    tokenClient.error_callback = (error) => {
+      finish(reject, new Error(`${error?.type ?? 'no_token'}: ${error?.message ?? 'Google declined the request for Drive access.'}`));
+    };
+
     try {
       tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
     } catch (error) {
-      reject(error);
+      finish(reject, error);
     }
   });
 }
@@ -103,7 +154,12 @@ async function driveFetch(path, { clientId, ...options } = {}) {
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(`Drive error ${response.status}: ${detail.slice(0, 200)}`);
+    // Carry the status and raw body so interpretDriveFailure() can tell
+    // "Drive API not enabled" apart from "folder not found".
+    const error = new Error(`Drive error ${response.status}: ${detail.slice(0, 300)}`);
+    error.status = response.status;
+    error.body = detail;
+    throw error;
   }
   return response.json();
 }

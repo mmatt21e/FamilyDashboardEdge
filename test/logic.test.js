@@ -482,3 +482,59 @@ describe('startup diagnosis', () => {
     assert.equal(d.projectId, 'familydashboardedge');
   });
 });
+
+describe('drive failure diagnosis', () => {
+  const DRIVE_DISABLED = JSON.stringify({
+    error: { code: 403, message: 'Google Drive API has not been used in project familydashboardedge before or it is disabled.',
+             details: [{ reason: 'SERVICE_DISABLED' }] },
+  });
+
+  test('names the Drive API when it is not enabled', async () => {
+    const { interpretDriveFailure } = await import('../src/diagnose.js');
+    const d = interpretDriveFailure({ status: 403, body: DRIVE_DISABLED }, { projectId: 'familydashboardedge' });
+    assert.equal(d.code, 'drive-api-disabled');
+    assert.match(d.fix, /Enable/i);
+    assert.match(d.url, /drive\.googleapis\.com.*familydashboardedge/);
+  });
+
+  // The real hang: Google never answered because the origin was not registered
+  // and the account was not a test user. Both must produce actionable text.
+  test('explains a refused token as the origin or test-user setting', async () => {
+    const { interpretDriveFailure } = await import('../src/diagnose.js');
+    const d = interpretDriveFailure(
+      { message: 'no_token: Google never answered the request for Drive access.' },
+      { projectId: 'p' },
+    );
+    assert.equal(d.code, 'drive-not-authorised');
+    assert.match(d.fix, /Authorised JavaScript origins/i);
+    assert.match(d.fix, /Test users/i);
+  });
+
+  test('treats a blocked GIS script the same way', async () => {
+    const { interpretDriveFailure } = await import('../src/diagnose.js');
+    assert.equal(
+      interpretDriveFailure({ message: 'token_timeout: Google sign-in did not load.' }, {}).code,
+      'drive-not-authorised',
+    );
+  });
+
+  test('recognises a wrong folder id', async () => {
+    const { interpretDriveFailure } = await import('../src/diagnose.js');
+    const d = interpretDriveFailure({ status: 404, body: '{}' }, { folderId: 'abc123' });
+    assert.equal(d.code, 'drive-folder-missing');
+    assert.match(d.detail, /abc123/);
+  });
+
+  test('recognises an expired token', async () => {
+    const { interpretDriveFailure } = await import('../src/diagnose.js');
+    assert.equal(interpretDriveFailure({ status: 401, body: '' }, {}).code, 'drive-expired');
+  });
+
+  test('always returns something showable', async () => {
+    const { interpretDriveFailure } = await import('../src/diagnose.js');
+    for (const f of [{}, null, { status: 500, body: 'boom' }, { message: 'weird' }]) {
+      const d = interpretDriveFailure(f, {});
+      assert.ok(d.title && d.detail && d.fix, `no usable text for ${JSON.stringify(f)}`);
+    }
+  });
+});

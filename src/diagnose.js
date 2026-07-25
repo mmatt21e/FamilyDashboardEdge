@@ -127,3 +127,77 @@ export async function diagnoseStartup(config, options = {}) {
   const probe = await probeFirestore(projectId, options);
   return { ...interpretFirestoreProbe(probe, projectId), projectId };
 }
+
+
+// ---------------------------------------------------------------------------
+// Google Drive
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns a Drive or sign-in failure into something a person can act on.
+ *
+ * Drive needs three separate things switched on, in three different consoles,
+ * and getting any one wrong produces an unhelpful error. Rather than surface
+ * "Drive error 403" we name the missing setting and link to the page.
+ *
+ * @param {{status?: number, body?: string, message?: string}} failure
+ */
+export function interpretDriveFailure(failure, { projectId = '', folderId = '' } = {}) {
+  const { status, body = '', message = '' } = failure ?? {};
+  const text = `${body} ${message}`;
+
+  // The Drive API itself has never been enabled in the Cloud project.
+  if (/SERVICE_DISABLED/i.test(text) || /Google Drive API has not been used in project/i.test(text)) {
+    return {
+      code: 'drive-api-disabled',
+      title: 'Google Drive is not switched on yet',
+      detail: 'The Drive API has not been enabled for this project, so the app cannot read the shared folder.',
+      fix: 'In Google Cloud Console, open APIs & Services → Library, search for Google Drive API, and click Enable.',
+      url: projectId
+        ? `https://console.cloud.google.com/apis/library/drive.googleapis.com?project=${projectId}`
+        : 'https://console.cloud.google.com/apis/library/drive.googleapis.com',
+    };
+  }
+
+  // GIS refuses to issue a token to an origin it does not recognise, and to
+  // anyone who is not a test user while the app is unpublished. Both surface
+  // as a failure to obtain a token rather than an HTTP status.
+  if (/no_token|token_timeout|popup|idpiframe|origin|access_denied|unregistered/i.test(text)) {
+    return {
+      code: 'drive-not-authorised',
+      title: 'Google would not grant access to Drive',
+      detail: 'Google refused to issue permission for this site. That is almost always one of two settings.',
+      fix: 'In Google Cloud Console: (1) APIs & Services → Credentials → your Web client → add https://mmatt21e.github.io to Authorised JavaScript origins, with no path or trailing slash. (2) OAuth consent screen → Test users → add every family member’s email.',
+      url: projectId
+        ? `https://console.cloud.google.com/apis/credentials?project=${projectId}`
+        : 'https://console.cloud.google.com/apis/credentials',
+    };
+  }
+
+  if (status === 404) {
+    return {
+      code: 'drive-folder-missing',
+      title: 'That shared folder could not be found',
+      detail: folderId
+        ? `No Drive folder with the ID "${folderId}" is visible to your account.`
+        : 'No shared folder ID has been set.',
+      fix: 'Check the folder ID in Settings matches the code after /folders/ in the folder’s web address, and that the folder is shared with you.',
+    };
+  }
+
+  if (status === 401) {
+    return {
+      code: 'drive-expired',
+      title: 'Drive access expired',
+      detail: 'The permission Google issued has run out.',
+      fix: 'Reload the page to ask for it again.',
+    };
+  }
+
+  return {
+    code: 'drive-unknown',
+    title: 'Could not read the shared folder',
+    detail: message || (status ? `Google Drive replied with status ${status}.` : 'No further detail.'),
+    fix: 'Try again. If it keeps happening, check the Drive settings in Google Cloud Console.',
+  };
+}

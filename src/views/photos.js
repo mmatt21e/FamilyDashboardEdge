@@ -6,7 +6,8 @@
  * today's date in previous years.
  */
 
-import { el, spinner, emptyState, errorState, toast, formatDate } from '../ui.js';
+import { el, spinner, emptyState, toast, formatDate } from '../ui.js';
+import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
 import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from '../drive.js';
@@ -26,9 +27,20 @@ import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories
  * without this app knowing - but Firestore is what makes opening the app fast,
  * and it is where captions and comments will hang off a photo later.
  */
+let inFlight = null;
+
 export async function loadFiles({ force = false } = {}) {
-  if (state.loadingFiles) return;
+  // Photos and Memories both call this. Returning early while another call was
+  // running left the second view watching a spinner nothing would ever clear,
+  // so concurrent callers now await the SAME load instead.
+  if (inFlight) return inFlight;
   if (!force && !filesAreStale() && state.files.length) return;
+
+  inFlight = doLoad();
+  try { await inFlight; } finally { inFlight = null; }
+}
+
+async function doLoad() {
 
   // --- stage 1: the cached index -------------------------------------------
   if (!state.files.length) {
@@ -62,7 +74,12 @@ export async function loadFiles({ force = false } = {}) {
 
     void persistNewPointers(records);
   } catch (error) {
-    update({ loadingFiles: false, fileError: error?.message ?? 'Could not read the shared folder.' });
+    // Translate into something the family can act on, rather than a raw status.
+    const diagnosis = interpretDriveFailure(
+      { status: error?.status, body: error?.body, message: error?.message },
+      { projectId: state.config?.firebase?.projectId, folderId: state.config?.driveFolderId },
+    );
+    update({ loadingFiles: false, fileError: diagnosis });
   }
 }
 
@@ -91,6 +108,27 @@ async function persistNewPointers(records) {
   } catch {
     // Never let a caching failure break the photo grid; it is only an index.
   }
+}
+
+/**
+ * Shown when Drive cannot be read. Names the missing setting and links to the
+ * page that fixes it, rather than reporting a status code.
+ */
+function driveProblem(diagnosis, onRetry) {
+  const retry = el('button', { class: 'btn btn--primary', onClick: onRetry }, 'Try again');
+
+  return el('div', { class: 'empty' },
+    el('div', { class: 'empty__icon' }, '🔧'),
+    el('h2', {}, diagnosis.title ?? 'Could not read the shared folder'),
+    el('p', {}, diagnosis.detail ?? ''),
+    diagnosis.fix && el('div', { class: 'card' },
+      el('h2', {}, 'How to fix it'),
+      el('p', {}, diagnosis.fix),
+      diagnosis.url && el('a', { class: 'btn', href: diagnosis.url, target: '_blank', rel: 'noopener' },
+        'Open the Google console'),
+    ),
+    el('div', { class: 'row' }, retry),
+  );
 }
 
 /**
@@ -213,7 +251,7 @@ export async function photosView() {
       return container.replaceChildren(spinner('Loading photos…'));
     }
     if (state.fileError) {
-      return container.replaceChildren(errorState(state.fileError, async () => {
+      return container.replaceChildren(driveProblem(state.fileError, async () => {
         forgetDriveAccess();
         await loadFiles({ force: true });
         draw();
