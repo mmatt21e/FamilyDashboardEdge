@@ -80,6 +80,30 @@ export function spinner(label = 'Loading…') {
   return el('div', { class: 'spinner' }, el('div', { class: 'spinner__dot' }), el('span', {}, label));
 }
 
+/**
+ * A heading for a screen that is not in the bottom navigation.
+ *
+ * Those screens - importing photo tags, the setup checklist - are reached from
+ * somewhere else and have no tab of their own, so without a Back button the
+ * only way out is the browser's own, which a home-screen PWA does not show.
+ * On iOS there is no system back gesture inside a standalone web app either,
+ * which makes a screen with no way out genuinely a dead end.
+ *
+ * @param {string} title
+ * @param {{subtitle?: string, onBack?: Function, backLabel?: string}} options
+ */
+export function pageHeader(title, { subtitle = null, onBack = null, backLabel = 'Back' } = {}) {
+  const back = onBack && el('button', {
+    class: 'back', type: 'button', 'aria-label': backLabel, onClick: onBack,
+  }, el('span', { class: 'back__chevron', 'aria-hidden': 'true' }, '‹'), backLabel);
+
+  return el('header', { class: 'view__header' },
+    back,
+    el('h1', {}, title),
+    subtitle && el('p', { class: 'muted small' }, subtitle),
+  );
+}
+
 /** A friendly empty state, used instead of a blank screen anywhere data is missing. */
 export function emptyState(icon, title, message, action = null) {
   return el('div', { class: 'empty' },

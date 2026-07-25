@@ -79,6 +79,17 @@ jobs:
 
       - uses: actions/configure-pages@v5
 
+      # Writes the commit into the app so a phone can say exactly which build
+      # it is running, and so every deploy gets its own service worker cache.
+      # There is still no build step - this is a substitution, not a compiler.
+      - name: Stamp the build
+        run: |
+          SHA=$(git rev-parse --short=7 HEAD)
+          DATE=$(date -u +%Y-%m-%d)
+          sed -i "s/__BUILD_SHA__/$SHA/g; s/__BUILD_DATE__/$DATE/g" src/version.js sw.js
+          grep -q "$SHA" src/version.js || { echo "version.js was not stamped"; exit 1; }
+          grep -q "$SHA" sw.js || { echo "sw.js was not stamped"; exit 1; }
+
       # There is no build step. The repository root IS the site, which is the
       # main reason this app has no toolchain to keep alive.
       - uses: actions/upload-pages-artifact@v3

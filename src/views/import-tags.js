@@ -15,7 +15,8 @@
  * "people_index_v2 (1).csv" is that it is still the people index.
  */
 
-import { el, spinner, toast, children, formatDate } from '../ui.js';
+import { el, spinner, toast, children, formatDate, pageHeader } from '../ui.js';
+import { goBack } from '../router.js';
 import { state, update } from '../store.js';
 import { buildCatalog, detectCsvRole } from '../catalog.js';
 import { saveCatalog, loadCatalog, clearCatalog, catalogSummary } from '../catalog-store.js';
@@ -112,10 +113,11 @@ export async function importTagsView() {
   });
 
   container.replaceChildren(...children(
-    el('header', { class: 'view__header' },
-      el('h1', {}, 'Photo tags'),
-      el('span', { class: 'muted small' }, 'Who is in each photo'),
-    ),
+    pageHeader('Photo tags', {
+      subtitle: 'Who is in each photo',
+      onBack: () => goBack('/settings'),
+      backLabel: 'Settings',
+    }),
     explainerCard(),
     existing && existingCard(existing),
     el('section', { class: 'card' },

@@ -11,10 +11,14 @@ import { notificationsCard } from './notifications-card.js';
 import { inviteCard } from './invite.js';
 import { installCard } from './install-card.js';
 import { foldersCard } from './folders-card.js';
+import { versionLabel, buildDate } from '../version.js';
 
 export async function settingsView() {
   return el('div', { class: 'view' },
-    el('header', { class: 'view__header' }, el('h1', {}, 'Settings')),
+    el('header', { class: 'view__header' },
+      el('h1', {}, 'Settings'),
+      versionLine(),
+    ),
     ...children(
       installCard(),
       appearanceCard(),
@@ -27,6 +31,64 @@ export async function settingsView() {
       accountCard(),
     ),
   );
+}
+
+/**
+ * The version, under the heading, with a way to act on it.
+ *
+ * A version number on its own would be half a feature here. The reason anyone
+ * looks is that a home-screen PWA runs from a cache, so the phone can be a
+ * release or two behind with nothing on screen to say so - and the useful next
+ * move is "get the newest one", not "read a number".
+ */
+function versionLine() {
+  const label = el('span', {}, `Version ${versionLabel()}`);
+  const status = el('span', {});
+
+  const check = el('button', { class: 'link-btn', type: 'button' }, 'Check for updates');
+  check.addEventListener('click', async () => {
+    check.disabled = true;
+    status.textContent = ' · checking…';
+    const found = await checkForUpdate();
+    status.textContent = found ? ' · updating…' : ' · already up to date';
+    check.disabled = false;
+  });
+
+  return el('div', { class: 'muted small row' },
+    label,
+    buildDate() && el('span', {}, `· ${buildDate()}`),
+    status,
+    'serviceWorker' in navigator && check,
+  );
+}
+
+/**
+ * Asks the service worker to look for a newer release.
+ *
+ * When one is found it is told to take over immediately and the page reloads -
+ * otherwise a waiting worker sits there until every tab is closed, which for an
+ * app people leave open on the home screen can be days.
+ *
+ * @returns {Promise<boolean>} whether an update was found
+ */
+async function checkForUpdate() {
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return false;
+
+    await registration.update();
+    const waiting = registration.waiting ?? registration.installing;
+    if (!waiting) return false;
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+    waiting.postMessage({ type: 'SKIP_WAITING' });
+    // Installing workers need a moment before they can be activated; the
+    // controllerchange listener above catches it either way.
+    setTimeout(() => location.reload(), 2500);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function appearanceCard() {

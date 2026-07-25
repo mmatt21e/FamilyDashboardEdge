@@ -11,7 +11,8 @@
  * worked; nothing else needs to be trusted or self-reported.
  */
 
-import { el, spinner, toast } from '../ui.js';
+import { el, spinner, toast, pageHeader } from '../ui.js';
+import { goBack } from '../router.js';
 import { state } from '../store.js';
 import { listFolder } from '../drive.js';
 import { isStandalone } from '../firebase.js';
@@ -51,11 +52,10 @@ export async function onboardingView() {
   function redraw() {
     saveProgress(progress);
     container.replaceChildren(
-      el('header', { class: 'view__header' },
-        el('h1', {}, 'Getting set up'),
-        el('p', { class: 'muted' },
-          'Five short steps, once per phone. Photos then arrive on their own.'),
-      ),
+      pageHeader('Getting set up', {
+        subtitle: 'Five short steps, once per phone. Photos then arrive on their own.',
+        onBack: () => goBack('/'),
+      }),
       ...steps.map((step, index) => stepCard(step, index + 1, progress, redraw)),
       verificationCard(),
     );

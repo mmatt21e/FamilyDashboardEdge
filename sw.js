@@ -11,7 +11,14 @@
  */
 
 const CACHE_VERSION = 'v10';
-const CACHE = `family-dashboard-${CACHE_VERSION}`;
+
+// Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
+// gets a cache of its own automatically. Relying on a hand-bumped version
+// meant that forgetting to bump it left phones serving the previous release
+// from cache with nothing on screen to say so.
+const BUILD_SHA = '__BUILD_SHA__';
+
+const CACHE = `family-dashboard-${CACHE_VERSION}-${BUILD_SHA}`;
 
 const SHELL = [
   './',
@@ -37,6 +44,7 @@ const SHELL = [
   './src/router.js',
   './src/store.js',
   './src/ui.js',
+  './src/version.js',
   './src/views/feed.js',
   './src/views/import-tags.js',
   './src/views/folders-card.js',
@@ -68,6 +76,13 @@ self.addEventListener('activate', (event) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
+});
+
+// Settings' "Check for updates" sends this. Without it a newly installed
+// worker waits for every tab to close, which for an app that lives on a home
+// screen can be days.
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', (event) => {

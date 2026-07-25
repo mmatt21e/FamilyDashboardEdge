@@ -17,6 +17,7 @@ import { dayKeyFor, dayKeysForToday, groupByYearsAgo, isLeapYear, describeYearsA
 import { parseExifDate, originalDateFor, toPointerRecord, kindForMime, sortByTakenDesc, formatSize, dateFromFilename,
   ownerFromPath, isDateFolder, uploadPathFor, folderSafeName, personFolderPath } from '../src/files.js';
 import { memberFolderNames, ROOT_FOLDERS } from '../src/folders.js';
+import { APP_VERSION, isReleaseBuild, versionLabel, buildDate } from '../src/version.js';
 import {
   parseCsv, basenameOf, catalogKey, parseTimestamp, parseEventBucket, buildCatalog,
   buildLookup, matchEntry, applyCatalog, toChunks, fromChunks, packEntry, detectCsvRole,
@@ -1915,5 +1916,50 @@ describe('folders for family members', () => {
   test('the shared root has a fixed set of folders', () => {
     assert.equal(ROOT_FOLDERS.length, 4);
     assert.ok(ROOT_FOLDERS.every((f) => f.name && f.purpose));
+  });
+});
+
+describe('version reporting', () => {
+  // Two places to write the version down is exactly the kind of thing that
+  // drifts, and a wrong version is worse than none - it sends you looking for
+  // a bug in the wrong release.
+  test('package.json and the app agree', async () => {
+    const { readFileSync } = await import('node:fs');
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    assert.equal(pkg.version, APP_VERSION);
+  });
+
+  test('a checkout reports itself as a development build', () => {
+    assert.equal(isReleaseBuild(), false);
+    assert.match(versionLabel(), /development build/);
+    assert.equal(buildDate(), null);
+  });
+
+  test('the label always names the version', () => {
+    assert.ok(versionLabel().startsWith(APP_VERSION));
+  });
+
+  // If the substitution ever stops matching, every phone silently reports a
+  // development build and the whole point is lost. The workflow greps for the
+  // sha afterwards, so this checks the two ends still line up.
+  test('the deploy stamps both the app and the service worker', async () => {
+    const { readFileSync } = await import('node:fs');
+    const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+
+    const workflow = read('../.github/workflows/deploy.yml');
+    assert.match(workflow, /__BUILD_SHA__/, 'the workflow must substitute the sha');
+    assert.match(workflow, /src\/version\.js sw\.js/, 'both files must be stamped');
+
+    assert.match(read('../src/version.js'), /__BUILD_SHA__/);
+    assert.match(read('../src/version.js'), /__BUILD_DATE__/);
+    assert.match(read('../sw.js'), /__BUILD_SHA__/);
+  });
+
+  // The button in Settings is useless if the worker ignores the message.
+  test('the service worker acts on the update message Settings sends', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+    assert.match(sw, /SKIP_WAITING/);
+    assert.match(sw, /addEventListener\('message'/);
   });
 });

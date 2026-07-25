@@ -26,6 +26,7 @@ and it never handles anyone else's data.
 | Settings with on/off switches for every feature | Working |
 | Per-person notification preferences | Preferences work; **sending needs a Cloud Function** |
 | Dark mode | Working |
+| Version number and one-tap update check in Settings | Working |
 | Setup checklist with PhotoSync walkthrough | Working |
 | The other ~35 features from the plan | Listed in Settings as "Coming soon" |
 
@@ -283,6 +284,7 @@ src/
   catalog-store.js    where those tags live in Firestore
   photo-edits.js      corrections made by hand, which an import never undoes
   photo-filter.js     the photo filter bar's logic
+  version.js          which build this is — stamped at deploy
   firebase.js         sign-in and data
   drive.js            the shared folder
   views/              one file per screen

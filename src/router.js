@@ -74,11 +74,32 @@ export function mount(node) {
   window.addEventListener('hashchange', render);
 }
 
+/**
+ * How many screens deep this visit is.
+ *
+ * Counted rather than read from `history.length`, which includes everything the
+ * tab did before the app was opened and so cannot tell "came here from
+ * Settings" from "opened this link cold". A Back button that leaves the app
+ * entirely is worse than no Back button at all.
+ */
+let visited = 0;
+
+export function canGoBack() {
+  return visited > 1;
+}
+
+/** Back where they came from, or to a sensible screen if they arrived cold. */
+export function goBack(fallback = '/') {
+  if (canGoBack()) history.back();
+  else navigate(fallback, { replace: true });
+}
+
 export async function render() {
   if (!outlet) return;
   const path = currentPath();
   const match = resolve(path);
   current = path;
+  visited += 1;
 
   outlet.scrollTop = 0;
   const view = match ? match.render : notFound;
