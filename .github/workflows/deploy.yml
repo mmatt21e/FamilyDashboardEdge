@@ -7,9 +7,13 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Allow one deploy at a time; cancel a superseded run rather than queueing.
+# One run at a time PER BRANCH. Scoped by ref deliberately: with a single
+# shared group, pushing two branches close together made the test-only run on
+# one cancel the deploying run on the other, so a deploy could silently never
+# happen. Only the default branch deploys, so per-ref scoping still leaves at
+# most one deployment in flight.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
