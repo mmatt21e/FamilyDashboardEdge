@@ -84,6 +84,14 @@ service cloud.firestore {
       allow read, write: if isFamily();
     }
 
+    // Corrections made by hand: a person added, a wrong one removed, a date
+    // fixed or cleared. Anyone in the family may correct any photo - the person
+    // who recognises a face is not always the one who uploaded it, and that is
+    // rather the point of a shared family album.
+    match /photo_edits/{driveId} {
+      allow read, write: if isFamily();
+    }
+
     // Per-person notification preferences. Yours alone - nobody else in the
     // family needs to see or change what you have opted into.
     match /notification_prefs/{uid} {

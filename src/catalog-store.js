@@ -15,8 +15,10 @@
 
 import * as fb from './firebase.js';
 import { toChunks, fromChunks, summariseEntries, buildLookup } from './catalog.js';
+import { isEmptyEdit } from './photo-edits.js';
 
 const COLLECTION = 'photo_catalog';
+const EDITS = 'photo_edits';
 const META_ID = 'meta';
 const CACHE_KEY = 'fd.catalog';
 
@@ -157,6 +159,75 @@ export async function catalogSummary() {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Corrections made by hand
+// ---------------------------------------------------------------------------
+// A document per corrected photo, keyed on its Drive id, in a collection of its
+// own. Separate from the catalog on purpose: an import replaces the catalog
+// wholesale and must never take somebody's correction with it.
+//
+// Not chunked, unlike the catalog, because these are written one at a time
+// while looking at a photo and there will only ever be as many as the family
+// bothered to fix - hundreds at the outside, against three thousand imported.
+
+const MAX_EDITS = 2000;
+
+let editCache = null;
+
+/** Every correction, as a Map keyed by Drive id. */
+export async function loadEdits({ force = false } = {}) {
+  if (editCache && !force) return editCache;
+
+  try {
+    const docs = await fb.queryDocs(EDITS, { limit: MAX_EDITS });
+    editCache = new Map(docs.map((doc) => [doc.driveId ?? doc.id, doc]));
+
+    if (docs.length >= MAX_EDITS) {
+      // Say so rather than silently showing a subset. Reaching this would mean
+      // the corrections deserve their own chunked store, like the catalog.
+      console.warn(`photo_edits hit the ${MAX_EDITS} document cap; some corrections are not loaded.`);
+    }
+  } catch {
+    // Rules not published yet, or offline. No corrections is a valid state.
+    editCache = editCache ?? new Map();
+  }
+  return editCache;
+}
+
+/** The corrections already loaded. Never triggers a read. */
+export function cachedEdits() {
+  return editCache ?? new Map();
+}
+
+/**
+ * Saves one correction, or removes it when it no longer overrides anything -
+ * which is what "reset this photo back to what was imported" does.
+ */
+export async function saveEdit(driveId, edit) {
+  if (!driveId) return null;
+
+  if (isEmptyEdit(edit)) {
+    await deleteEdit(driveId);
+    return null;
+  }
+
+  // merge: false, so unsetting a field actually unsets it. A merge write would
+  // leave the old override behind and the correction would look ignored.
+  await fb.setDoc(EDITS, driveId, edit, { merge: false });
+  editCache = editCache ?? new Map();
+  editCache.set(driveId, edit);
+  return edit;
+}
+
+export async function deleteEdit(driveId) {
+  try {
+    await fb.deleteDoc(EDITS, driveId);
+  } catch {
+    // Already gone, which is the state we wanted.
+  }
+  editCache?.delete(driveId);
 }
 
 // ---------------------------------------------------------------------------

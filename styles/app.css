@@ -384,6 +384,45 @@ a { color: var(--accent); }
 }
 .tile:hover .tile__people, .tile:focus-visible .tile__people { opacity: 1; }
 
+/* --- Correcting tags by hand ---------------------------------------------- */
+
+/* A sheet rather than a centred dialog: on a phone it comes up from the bottom
+   under the thumb, and on a laptop it settles in the middle of the window. */
+.sheet {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, .5);
+}
+.sheet__panel {
+  width: min(32rem, 100%); max-height: 92dvh; overflow-y: auto;
+  background: var(--surface); color: var(--text);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 1rem 1rem calc(env(safe-area-inset-bottom) + 1rem);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, .25);
+}
+.sheet__head { margin-bottom: .75rem; }
+.sheet__head h2 { margin-bottom: .1rem; }
+.sheet__head p { margin: 0; word-break: break-word; }
+.sheet__foot { margin-top: 1rem; align-items: flex-start; }
+
+@media (min-width: 640px) {
+  .sheet { align-items: center; }
+  .sheet__panel { border-radius: var(--radius); }
+}
+
+.tag-form .field { margin-bottom: 1.1rem; }
+.tag-form .chips { min-height: 1.9rem; align-items: center; }
+/* .input is full width by default, which would put the date, the time and the
+   clear button on three separate lines. Inside a row they share it instead. */
+.tag-form .row .input { width: auto; flex: 1 1 7rem; min-width: 0; }
+.tag-form .row .btn { flex: none; }
+
+/* On the black viewer backdrop the normal button is nearly invisible. */
+.btn--onDark {
+  background: rgba(255, 255, 255, .16); color: #fff;
+  border-color: rgba(255, 255, 255, .3); margin-top: .5rem;
+}
+
 /* --- Importing photo tags ------------------------------------------------- */
 
 .card--inset { background: var(--surface-2); box-shadow: none; margin-top: .75rem; }

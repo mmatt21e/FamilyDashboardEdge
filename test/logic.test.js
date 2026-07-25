@@ -23,6 +23,10 @@ import {
   emptyFilters, hasActiveFilters, filterPhotos, buildFacets, describeFilters,
   clearFilter, describeCount, PEOPLE_MODE,
 } from '../src/photo-filter.js';
+import {
+  applyEdits, buildEdit, isEmptyEdit, editedFields, normalisePersonName,
+  addPerson, removePerson, toDateInput, toTimeInput, fromDateInput, parseEventInput,
+} from '../src/photo-edits.js';
 
 const validConfig = {
   familyName: 'The Smiths',
@@ -1002,5 +1006,221 @@ describe('offline shell', () => {
     for (const file of files) {
       assert.ok(sw.includes(`'${file}'`), `${file} is missing from the sw.js shell list`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Corrections made by hand
+// ---------------------------------------------------------------------------
+
+describe('applying corrections', () => {
+  const records = [
+    { driveId: '1', name: 'a.jpg', people: ['Jocelyn'], event: null, takenAt: '2010-07-04T12:00:00.000Z', dayKey: '07-04' },
+    { driveId: '2', name: 'b.jpg', people: [], event: null, takenAt: null, dayKey: null },
+  ];
+
+  test('an override replaces what the catalog said', () => {
+    const edits = new Map([['1', { driveId: '1', people: ['Jocelyn', 'Mindy'] }]]);
+    const [first] = applyEdits(records, edits);
+    assert.deepEqual(first.people, ['Jocelyn', 'Mindy']);
+    assert.equal(first.takenAt, '2010-07-04T12:00:00.000Z', 'an untouched field must be left alone');
+    assert.equal(first.edited, true);
+  });
+
+  // The distinction the whole file exists for: a date explicitly cleared is not
+  // the same as a date nobody has touched.
+  test('a cleared date is an override, not a missing key', () => {
+    const [first] = applyEdits(records, new Map([['1', { driveId: '1', takenAt: null }]]));
+    assert.equal(first.takenAt, null);
+    assert.equal(first.dayKey, null, 'clearing a date must take it out of Memories too');
+  });
+
+  test('a corrected date reaches the memory feed', () => {
+    const [, second] = applyEdits(records, new Map([['2', { driveId: '2', takenAt: '1999-03-17T12:00:00.000Z' }]]));
+    assert.equal(second.dayKey, '03-17');
+  });
+
+  test('removing everyone is a real answer, not an empty edit', () => {
+    const [first] = applyEdits(records, new Map([['1', { driveId: '1', people: [] }]]));
+    assert.deepEqual(first.people, []);
+  });
+
+  test('photos with no correction are returned untouched', () => {
+    const out = applyEdits(records, new Map([['1', { driveId: '1', people: ['X'] }]]));
+    assert.equal(out[1], records[1]);
+  });
+
+  test('no corrections at all is a no-op', () => {
+    assert.equal(applyEdits(records, new Map()), records);
+    assert.equal(applyEdits(records, null), records);
+  });
+});
+
+describe('building a correction', () => {
+  const shown = { people: ['Jocelyn'], event: null, takenAt: '2010-07-04T12:00:00.000Z' };
+
+  test('stores only the fields that were actually changed', () => {
+    const edit = buildEdit({
+      driveId: '1', shown,
+      values: { ...shown, people: ['Jocelyn', 'Mindy'] },
+    });
+    assert.deepEqual(edit.people, ['Jocelyn', 'Mindy']);
+    assert.equal(Object.hasOwn(edit, 'takenAt'), false, 'an unchanged date must not become an override');
+    assert.equal(Object.hasOwn(edit, 'event'), false);
+  });
+
+  test('changing nothing produces no correction at all', () => {
+    assert.equal(buildEdit({ driveId: '1', shown, values: { ...shown } }), null);
+  });
+
+  // Without this, correcting the same photo twice would silently drop the first
+  // correction: the second edit compares against the already-corrected values,
+  // sees no change, and writes nothing for that field.
+  test('keeps an existing override when this pass did not touch that field', () => {
+    const existing = { driveId: '1', people: ['Jocelyn', 'Mindy'] };
+    const edit = buildEdit({
+      driveId: '1', existing,
+      shown: { ...shown, people: ['Jocelyn', 'Mindy'] },
+      values: { people: ['Jocelyn', 'Mindy'], event: null, takenAt: '1999-01-01T12:00:00.000Z' },
+    });
+    assert.deepEqual(edit.people, ['Jocelyn', 'Mindy'], 'the earlier correction must survive');
+    assert.equal(edit.takenAt, '1999-01-01T12:00:00.000Z');
+  });
+
+  test('an order-only difference in the people list is not a change', () => {
+    const edit = buildEdit({
+      driveId: '1',
+      shown: { people: ['Mindy', 'Jocelyn'] },
+      values: { people: ['Jocelyn', 'Mindy'] },
+    });
+    assert.equal(edit, null);
+  });
+
+  test('clearing a date that had one is a change', () => {
+    const edit = buildEdit({ driveId: '1', shown, values: { ...shown, takenAt: null } });
+    assert.equal(Object.hasOwn(edit, 'takenAt'), true);
+    assert.equal(edit.takenAt, null);
+  });
+
+  test('records who made the correction and when', () => {
+    const edit = buildEdit({ driveId: '1', name: 'a.jpg', shown, values: { ...shown, people: [] }, by: 'uid-1' });
+    assert.equal(edit.editedBy, 'uid-1');
+    assert.equal(edit.name, 'a.jpg');
+    assert.ok(!Number.isNaN(new Date(edit.editedAt).getTime()));
+  });
+
+  // Uploads compare against nothing, so a blank form must not write a document.
+  test('an untouched form on upload writes nothing', () => {
+    assert.equal(buildEdit({ driveId: 'new', shown: {}, values: { people: [], event: null, takenAt: null } }), null);
+  });
+
+  test('a filled-in form on upload writes what was filled in', () => {
+    const edit = buildEdit({ driveId: 'new', shown: {}, values: { people: ['Matt'], event: null, takenAt: null } });
+    assert.deepEqual(edit.people, ['Matt']);
+    assert.equal(Object.hasOwn(edit, 'takenAt'), false);
+  });
+
+  test('knows an emptied correction can be deleted', () => {
+    assert.equal(isEmptyEdit(null), true);
+    assert.equal(isEmptyEdit({ driveId: '1', editedAt: 'x' }), true);
+    assert.equal(isEmptyEdit({ driveId: '1', people: [] }), false);
+  });
+
+  test('names the corrected fields for the viewer', () => {
+    assert.deepEqual(editedFields({ people: [], takenAt: null }), ['people', 'takenAt']);
+  });
+});
+
+describe('typing a person in', () => {
+  test('matches a known name whatever case it was typed in', () => {
+    assert.equal(normalisePersonName('  jocelyn ', ['Jocelyn', 'Matt']), 'Jocelyn');
+  });
+
+  test('allows a name nobody has used before', () => {
+    assert.equal(normalisePersonName('Aunt Nell', ['Jocelyn']), 'Aunt Nell');
+  });
+
+  test('collapses runs of whitespace', () => {
+    assert.equal(normalisePersonName('Bobbi   Jean', []), 'Bobbi Jean');
+  });
+
+  test('refuses blanks and absurd lengths', () => {
+    assert.equal(normalisePersonName('   ', []), null);
+    assert.equal(normalisePersonName('x'.repeat(61), []), null);
+    assert.equal(normalisePersonName(null, []), null);
+  });
+
+  test('adding is sorted and never duplicates', () => {
+    assert.deepEqual(addPerson(['Mindy'], 'Jocelyn'), ['Jocelyn', 'Mindy']);
+    assert.deepEqual(addPerson(['Jocelyn'], 'jocelyn'), ['Jocelyn'], 'case must not create a second person');
+  });
+
+  test('removing is case-insensitive too', () => {
+    assert.deepEqual(removePerson(['Jocelyn', 'Mindy'], 'JOCELYN'), ['Mindy']);
+  });
+});
+
+describe('editing a date', () => {
+  // toISOString() converts to UTC first, so an evening photo would show the
+  // next day's date east of Greenwich - and editing it would move the photo.
+  test('the date field shows the local day, not the UTC one', () => {
+    const evening = new Date(2015, 8, 11, 22, 30, 0);
+    assert.equal(toDateInput(evening.toISOString()), '2015-09-11');
+    assert.equal(toTimeInput(evening.toISOString()), '22:30');
+  });
+
+  test('an empty or unparseable date gives empty fields', () => {
+    assert.equal(toDateInput(null), '');
+    assert.equal(toDateInput('not a date'), '');
+    assert.equal(toTimeInput(null), '');
+  });
+
+  test('reads the fields back to the same local day', () => {
+    const iso = fromDateInput('2015-09-11', '22:30');
+    const back = new Date(iso);
+    assert.equal(back.getFullYear(), 2015);
+    assert.equal(back.getMonth(), 8);
+    assert.equal(back.getDate(), 11);
+    assert.equal(back.getHours(), 22);
+  });
+
+  // Midday, not midnight: a timezone or daylight-saving shift at midnight rolls
+  // the photo into the day before, which for "on this day" is the whole bug.
+  test('a date with no time lands at midday so it cannot roll backwards', () => {
+    assert.equal(new Date(fromDateInput('2015-09-11')).getHours(), 12);
+    assert.equal(new Date(fromDateInput('2015-09-11')).getDate(), 11);
+  });
+
+  test('a round trip through both helpers is stable', () => {
+    const iso = fromDateInput('2004-02-29', '08:05');
+    assert.equal(toDateInput(iso), '2004-02-29');
+    assert.equal(toTimeInput(iso), '08:05');
+  });
+
+  test('refuses a date that does not exist rather than rolling it over', () => {
+    assert.equal(fromDateInput('2015-02-30'), null);
+    assert.equal(fromDateInput('2015-13-01'), null);
+    assert.equal(fromDateInput(''), null);
+    assert.equal(fromDateInput('11/09/2015'), null);
+  });
+});
+
+describe('typing an event in', () => {
+  test('a bare name is enough', () => {
+    assert.deepEqual(parseEventInput('Isle of Skye'), { id: 'isle-of-skye', category: null, name: 'Isle of Skye' });
+  });
+
+  test('a slash files it under a category', () => {
+    assert.deepEqual(parseEventInput(' Trips / Vegas '), { id: 'trips-vegas', category: 'Trips', name: 'Vegas' });
+  });
+
+  test('an id built here matches one built from an imported bucket', () => {
+    assert.equal(parseEventInput('Trips / 2014 Cruise').id, parseEventBucket('02_Events/Trips/2014 Cruise').id);
+  });
+
+  test('refuses input with no name in it', () => {
+    assert.equal(parseEventInput(''), null);
+    assert.equal(parseEventInput('  /  '), null);
+    assert.equal(parseEventInput('!!!'), null);
   });
 });

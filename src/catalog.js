@@ -438,7 +438,8 @@ export function applyCatalog(records, lookup) {
   });
 }
 
-function dayKeyFromIso(iso) {
+/** "MM-DD" from an ISO string, for the memory feed. Null when there is no date. */
+export function dayKeyFromIso(iso) {
   if (!iso) return null;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;

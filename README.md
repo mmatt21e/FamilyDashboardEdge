@@ -17,6 +17,7 @@ and it never handles anyone else's data.
 | Sign in with your own Google account | Working |
 | **Photos** — everything in the shared Drive folder | Working |
 | **Filter photos** by who is in them, year, month, event, folder or text | Working |
+| **Tag and correct photos by hand** — people, event, date | Working |
 | **Memories** — on this day, a year / four years / ten years ago | Working |
 | **Calendar** — visits, trips, when everyone is together | Working |
 | **Message board** — short updates and photos | Working |
@@ -152,6 +153,33 @@ Two things worth knowing about the data:
   trade is that the tagged library has to fit in memory — fine for the few
   thousand photos a family actually curates, which is a good reason to curate.
 
+### Correcting tags by hand
+
+The import is a machine's opinion, and machines get it wrong — a face in shadow
+missed, two siblings confused, whatever wrong date the camera had. So any photo
+can be corrected by anyone in the family:
+
+- **In the viewer.** Open a photo, press **Edit tags**. Add a person, tap a
+  name's ✕ to remove them, set or clear the date, put it in an event.
+- **When adding photos.** Choosing files brings up the same form before the
+  upload starts, and the answers apply to the whole batch. This is the one
+  moment when whoever is adding them definitely knows what they are.
+- **In Memories**, too — where a wrong date is most obvious, because the photo
+  turns up on the wrong anniversary.
+
+Clearing a date is a real answer, not a blank: the photo drops out of the year
+and month filters and stops appearing in Memories. That is usually what you want
+for a scan whose file date is the day it was scanned.
+
+Corrections live in their own `photo_edits` collection, **separate from the
+imported catalog**, and a re-import never touches them. A person who looked at a
+photo and said who is in it is a better source than a face model, and stays that
+way. Each correction stores only the fields actually changed, so a photo whose
+date you fixed still picks up better *people* from the next import.
+
+Manual tagging works whether or not you have ever run the face tools — a family
+that just wants to tag as they go can ignore the import entirely.
+
 ### Seed the memories
 
 Memories has nothing to show on day one. Drop a few hundred older photos into
@@ -209,6 +237,7 @@ src/
   files.js            Drive metadata → pointer records
   catalog.js          face-tag CSVs → who is in each photo
   catalog-store.js    where those tags live in Firestore
+  photo-edits.js      corrections made by hand, which an import never undoes
   photo-filter.js     the photo filter bar's logic
   firebase.js         sign-in and data
   drive.js            the shared folder

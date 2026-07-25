@@ -14,7 +14,9 @@ import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from
 import { toPointerRecord, sortByTakenDesc, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
 import { applyCatalog } from '../catalog.js';
-import { loadCatalog } from '../catalog-store.js';
+import { loadCatalog, loadEdits, cachedEdits, saveEdit, deleteEdit } from '../catalog-store.js';
+import { applyEdits, buildEdit, editedFields } from '../photo-edits.js';
+import { openTagSheet } from './photo-editor.js';
 import {
   emptyFilters, filterPhotos, buildFacets, describeFilters,
   clearFilter, describeCount, toggleValue, PEOPLE_MODE,
@@ -64,8 +66,22 @@ async function ensureCatalog() {
   }
 }
 
+/**
+ * The listing with the catalog applied but *not* the hand corrections.
+ *
+ * Kept so a correction can be re-applied without re-listing Drive: corrections
+ * change while you are looking at a photo, and a round trip to Drive to see
+ * your own edit appear would be absurd.
+ */
+let baseRecords = [];
+
+/** Drive → catalog → corrections, narrowest source last. */
+function withEdits(records) {
+  return sortByTakenDesc(applyEdits(records, cachedEdits()));
+}
+
 async function doLoad() {
-  const catalog = await ensureCatalog();
+  const [catalog] = await Promise.all([ensureCatalog(), loadEdits()]);
   const tag = (records) => applyCatalog(records, catalog?.lookup);
 
   // --- stage 1: the cached index -------------------------------------------
@@ -73,7 +89,8 @@ async function doLoad() {
     try {
       const cached = await fb.queryDocs('files', { orderBy: ['takenAt', 'desc'], limit: 500 });
       if (cached.length) {
-        update({ files: sortByTakenDesc(tag(cached)), driveReady: true });
+        baseRecords = tag(cached);
+        update({ files: withEdits(baseRecords), driveReady: true });
         window.dispatchEvent(new CustomEvent('fd:files-changed'));
       }
     } catch {
@@ -91,8 +108,9 @@ async function doLoad() {
       .map(({ file, folderName }) => toPointerRecord(file, { folderName }))
       .filter(Boolean);
 
+    baseRecords = tag(records);
     update({
-      files: sortByTakenDesc(tag(records)),
+      files: withEdits(baseRecords),
       filesLoadedAt: Date.now(),
       driveReady: true,
       loadingFiles: false,
@@ -137,6 +155,87 @@ async function persistNewPointers(records) {
     }
   } catch {
     // Never let a caching failure break the photo grid; it is only an index.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Correcting tags by hand
+// ---------------------------------------------------------------------------
+
+const FIELD_LABELS = { people: 'who is in it', event: 'the event', takenAt: 'the date' };
+const fieldLabel = (field) => FIELD_LABELS[field] ?? field;
+
+/** Names and events already in use, so the editor can suggest rather than ask. */
+function knownTags() {
+  const facets = buildFacets(state.files);
+  return {
+    knownPeople: facets.people.map((person) => person.label),
+    knownEvents: facets.events,
+  };
+}
+
+/** Re-applies corrections over the cached listing. No network. */
+function refreshFromEdits() {
+  update({ files: withEdits(baseRecords) });
+  window.dispatchEvent(new CustomEvent('fd:files-changed'));
+}
+
+/**
+ * Opens the tag editor for one photo and saves what comes back.
+ *
+ * The correction stores only the fields actually changed, so a photo whose date
+ * was fixed still picks up better people from the next import - and a photo
+ * whose people were fixed keeps them, whatever the next import decides.
+ *
+ * @returns {Promise<boolean>} whether anything was saved
+ */
+async function editPhotoTags(record) {
+  const existing = cachedEdits().get(record.driveId) ?? null;
+  const shown = { people: record.people ?? [], event: record.event ?? null, takenAt: record.takenAt ?? null };
+
+  let didReset = false;
+  const values = await openTagSheet({
+    title: 'Edit tags',
+    subtitle: record.name,
+    initial: shown,
+    ...knownTags(),
+    onReset: existing ? () => { didReset = true; } : null,
+  });
+
+  if (didReset) {
+    try {
+      await deleteEdit(record.driveId);
+      refreshFromEdits();
+      toast('Corrections undone');
+      return true;
+    } catch (error) {
+      toast(error?.message ?? 'Could not undo the corrections', { error: true });
+      return false;
+    }
+  }
+  if (!values) return false;
+
+  const edit = buildEdit({
+    driveId: record.driveId,
+    name: record.name,
+    existing,
+    shown,
+    values,
+    by: state.user?.uid ?? null,
+  });
+
+  // Nothing changed and nothing was overridden before: saving an empty document
+  // would be a write for no reason.
+  if (!edit && !existing) return false;
+
+  try {
+    await saveEdit(record.driveId, edit);
+    refreshFromEdits();
+    toast(edit ? 'Tags saved' : 'Corrections undone');
+    return true;
+  } catch (error) {
+    toast(error?.message ?? 'Could not save the tags', { error: true });
+    return false;
   }
 }
 
@@ -201,34 +300,73 @@ function tile(record, onOpen) {
   return node;
 }
 
-/** Full-screen viewer. Kept simple: tap anywhere or press Escape to close. */
-function openViewer(record, { onFilterPerson = null } = {}) {
+/**
+ * Full-screen viewer. Tap the backdrop or press Escape to close.
+ *
+ * Editing lives here because this is the moment someone actually recognises the
+ * face they are looking at. Making them remember it, navigate somewhere else
+ * and find the photo again is how tags never get corrected.
+ */
+function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = null } = {}) {
+  let current = record;
   const img = el('img', { class: 'viewer__img', alt: record.name });
+  const meta = el('div', { class: 'viewer__meta' });
 
-  const people = record.people?.length
-    ? el('div', { class: 'chips chips--tight' }, record.people.map((person) => {
-        const chip = el('button', { class: 'chip chip--action', type: 'button' }, person);
-        chip.addEventListener('click', (event) => {
-          event.stopPropagation();
-          onFilterPerson?.(person);
-        });
-        return chip;
-      }))
-    : null;
+  const drawMeta = () => {
+    const corrected = editedFields(cachedEdits().get(current.driveId));
+
+    meta.replaceChildren(...children(
+      el('div', {}, current.name),
+      el('div', { class: 'muted small' },
+        [
+          current.takenAt ? formatDate(current.takenAt) : 'Date unknown',
+          current.event?.name,
+          current.owner,
+        ].filter(Boolean).join(' · ')),
+
+      current.people?.length
+        ? el('div', { class: 'chips chips--tight' }, current.people.map((person) => {
+            const chip = el('button', { class: 'chip chip--action', type: 'button' }, person);
+            chip.addEventListener('click', (event) => {
+              event.stopPropagation();
+              onFilterPerson?.(person);
+            });
+            return chip;
+          }))
+        : el('div', { class: 'muted small' }, 'Nobody tagged'),
+
+      corrected.length > 0 && el('div', { class: 'muted small' },
+        `Corrected by hand: ${corrected.map(fieldLabel).join(', ')}.`),
+
+      onEdit && editButton(),
+    ));
+  };
+
+  function editButton() {
+    const button = el('button', { class: 'btn btn--onDark', type: 'button' }, 'Edit tags');
+    button.addEventListener('click', async (event) => {
+      // Without this the click reaches the backdrop handler and shuts the
+      // viewer the instant the sheet opens.
+      event.stopPropagation();
+      const saved = await onEdit(current);
+      if (!saved) return;
+
+      current = state.files.find((f) => f.driveId === current.driveId) ?? current;
+      drawMeta();
+      onChanged?.();
+    });
+    return button;
+  }
+
+  drawMeta();
+  // The caption is now full of things you can press, so it must not double as
+  // "tap anywhere to close".
+  meta.addEventListener('click', (event) => event.stopPropagation());
 
   const overlay = el('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true' },
     el('button', { class: 'viewer__close', 'aria-label': 'Close' }, '✕'),
     img,
-    el('div', { class: 'viewer__meta' },
-      el('div', {}, record.name),
-      el('div', { class: 'muted small' },
-        [
-          record.takenAt ? formatDate(record.takenAt) : 'Date unknown',
-          record.event?.name,
-          record.owner,
-        ].filter(Boolean).join(' · ')),
-      people,
-    ),
+    meta,
   );
 
   void (async () => {
@@ -252,6 +390,18 @@ function openViewer(record, { onFilterPerson = null } = {}) {
   return close;
 }
 
+/**
+ * Adding photos, with their tags.
+ *
+ * The tag sheet comes up *before* the upload rather than after, because this is
+ * the one moment when whoever is adding the photos definitely knows what they
+ * are looking at. Answers apply to the whole batch, which is almost always
+ * right - people add a handful from the same afternoon, not a random sample of
+ * their life. Anything that does not fit can be corrected in the viewer.
+ *
+ * Leaving the sheet blank and pressing Upload is a perfectly good answer; no
+ * correction is written for a field nobody filled in.
+ */
 function uploadButton() {
   const input = el('input', { type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true });
   const button = el('button', { class: 'btn btn--primary' }, 'Add photos');
@@ -263,12 +413,26 @@ function uploadButton() {
     input.value = '';
     if (!files.length) return;
 
+    const values = await openTagSheet({
+      title: `Add ${files.length} ${files.length === 1 ? 'photo' : 'photos'}`,
+      subtitle: 'Tags are optional, and apply to everything in this batch.',
+      // The camera date is read from the files themselves once they are in
+      // Drive, so there is nothing to clear here yet - only something to set,
+      // which is what scanned photos and old videos need.
+      allowClearDate: false,
+      ...knownTags(),
+      saveLabel: files.length === 1 ? 'Upload' : `Upload ${files.length}`,
+    });
+    if (!values) return;
+
     button.disabled = true;
     let done = 0;
+    const uploaded = [];
+
     for (const file of files) {
       try {
         progress.textContent = `Uploading ${done + 1} of ${files.length}…`;
-        await uploadFile(file, {
+        const created = await uploadFile(file, {
           folderId: state.config.driveFolderId,
           clientId: state.config.googleClientId,
           onProgress: (fraction) => {
@@ -276,20 +440,59 @@ function uploadButton() {
           },
         });
         done += 1;
+        if (created?.id) uploaded.push({ id: created.id, name: created.name ?? file.name });
       } catch (error) {
         toast(error?.message ?? 'Upload failed', { error: true });
       }
     }
+
+    progress.textContent = uploaded.length ? 'Saving tags…' : '';
+    // Tags are written against the ids Drive just handed back, so they attach
+    // to the right photos even before the next listing sees them.
+    const tagged = await tagUploaded(uploaded, values);
+
     progress.textContent = '';
     button.disabled = false;
     if (done) {
-      toast(`Added ${done} ${done === 1 ? 'item' : 'items'}`);
+      toast(`Added ${done} ${done === 1 ? 'item' : 'items'}${tagged ? ' with tags' : ''}`);
       await loadFiles({ force: true });
       window.dispatchEvent(new CustomEvent('fd:files-changed'));
     }
   });
 
   return el('div', { class: 'row' }, button, input, progress);
+}
+
+/**
+ * Writes the batch's tags against the freshly uploaded files.
+ *
+ * `shown` is empty on purpose: nothing was displayed to compare against, so
+ * anything filled in counts as a correction and anything left blank does not.
+ *
+ * @returns {Promise<boolean>} whether any tags were written
+ */
+async function tagUploaded(uploaded, values) {
+  let wrote = false;
+
+  for (const file of uploaded) {
+    const edit = buildEdit({
+      driveId: file.id,
+      name: file.name,
+      shown: {},
+      values,
+      by: state.user?.uid ?? null,
+    });
+    if (!edit) continue;
+
+    try {
+      await saveEdit(file.id, edit);
+      wrote = true;
+    } catch {
+      // The photo is safely in Drive; losing a tag is not worth failing over,
+      // and it can be added again from the viewer.
+    }
+  }
+  return wrote;
 }
 
 // ---------------------------------------------------------------------------
@@ -499,6 +702,10 @@ export async function photosView() {
         close();
         onFilterChange({ ...emptyFilters(), people: [person] });
       },
+      onEdit: editPhotoTags,
+      // A corrected date or person can move a photo out of the current filter,
+      // so the grid behind the viewer is redrawn rather than left lying.
+      onChanged: () => drawResults({ keepBar: true }),
     });
   };
 
@@ -570,6 +777,13 @@ export async function photosView() {
 export async function memoriesView() {
   const container = el('div', { class: 'view' });
 
+  // Memories is where a wrong date is most obvious - a photo turns up on the
+  // wrong anniversary - so it can be corrected right there too.
+  const openMemory = (record) => openViewer(record, {
+    onEdit: editPhotoTags,
+    onChanged: () => draw(),
+  });
+
   const draw = () => {
     if (state.loadingFiles && !state.files.length) {
       return container.replaceChildren(spinner('Looking for memories…'));
@@ -593,7 +807,7 @@ export async function memoriesView() {
               el('h2', { class: 'memory-group__title' },
                 group.label,
                 el('span', { class: 'muted small' }, ` · ${group.year}`)),
-              el('div', { class: 'grid' }, group.items.map((record) => tile(record, openViewer))),
+              el('div', { class: 'grid' }, group.items.map((record) => tile(record, openMemory))),
             ))),
     );
   };
