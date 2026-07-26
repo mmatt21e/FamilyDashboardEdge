@@ -7,6 +7,7 @@
  */
 
 import { resolveState } from './modules.js';
+import { saveConfig } from './config.js';
 import * as fb from './firebase.js';
 
 const listeners = new Set();
@@ -46,9 +47,46 @@ export async function loadModuleSettings() {
   try {
     const doc = await fb.getDoc('modules', 'settings');
     update({ modules: resolveState(doc?.enabled ?? null) });
+    adoptFamilyName(doc?.familyName);
   } catch {
     update({ modules: resolveState(null) });
   }
+}
+
+/**
+ * The family's name, renameable from Settings.
+ *
+ * The name every device shows comes from its local config, which was stamped
+ * by whatever setup link that device used - so a rename done on one phone
+ * would normally leave every other phone wearing the old name forever. The
+ * fix rides the document this module already reads at every launch: the
+ * rename is written to modules/settings, and each device adopts it from
+ * there the next time it starts.
+ */
+function adoptFamilyName(name) {
+  const incoming = typeof name === 'string' ? name.trim() : '';
+  if (!incoming || !state.config || state.config.familyName === incoming) return;
+  try {
+    update({ config: saveConfig({ ...state.config, familyName: incoming }) });
+  } catch {
+    // Config invalid mid-setup; the name catches up on a later launch.
+  }
+}
+
+export async function setFamilyName(name) {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) throw new Error('The name cannot be empty.');
+
+  // Firestore first: if the family-wide write fails, this phone must not
+  // quietly diverge from everyone else's.
+  await fb.setDoc('modules', 'settings', {
+    familyName: trimmed,
+    updatedAt: new Date().toISOString(),
+    updatedBy: state.user?.uid ?? null,
+  });
+
+  update({ config: saveConfig({ ...state.config, familyName: trimmed }) });
+  return trimmed;
 }
 
 export async function setModuleEnabled(key, enabled) {

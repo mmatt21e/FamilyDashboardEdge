@@ -4,7 +4,7 @@
 
 import { el, toast, getTheme, applyTheme, children } from '../ui.js';
 import { groupedModules } from '../modules.js';
-import { state, setModuleEnabled } from '../store.js';
+import { state, setModuleEnabled, setFamilyName } from '../store.js';
 import { shareSetupCard, resetConfigButton } from './setup.js';
 import * as fb from '../firebase.js';
 import { notificationsCard } from './notifications-card.js';
@@ -22,6 +22,7 @@ export async function settingsView() {
     ),
     ...children(
       installCard(),
+      nameCard(),
       appearanceCard(),
       await notificationsCard(),
       modulesCard(),
@@ -77,6 +78,46 @@ async function checkForUpdate() {
   if (!live) return false;
   await applyUpdate();
   return true;
+}
+
+/**
+ * Renaming the dashboard.
+ *
+ * The name was set once during setup and there was no way to change it short
+ * of resetting the whole configuration. The rename is written family-wide
+ * (see setFamilyName in store.js), so one edit here renames it on everyone's
+ * phone at their next launch - not just this one.
+ */
+function nameCard() {
+  const input = el('input', {
+    class: 'input', type: 'text',
+    value: state.config?.familyName ?? '',
+    placeholder: 'The Smiths',
+    'aria-label': 'Dashboard name',
+  });
+  const save = el('button', { class: 'btn' }, 'Rename');
+
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    try {
+      const name = await setFamilyName(input.value);
+      input.value = name;
+      toast(`Renamed to ${name}`);
+    } catch (error) {
+      toast(error?.message ?? 'Could not save the name', { error: true });
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  return el('section', { class: 'card' },
+    el('h2', {}, 'Dashboard name'),
+    el('p', { class: 'muted small' },
+      'Shown on the home screen and in invitation emails. Renaming it here renames it '
+      + 'for the whole family — everyone else sees the new name the next time they open the app.'),
+    el('div', { class: 'field' }, input),
+    el('div', { class: 'row' }, save),
+  );
 }
 
 function appearanceCard() {
