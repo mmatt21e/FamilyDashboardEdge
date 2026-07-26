@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v14';
+const CACHE_VERSION = 'v15';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -88,9 +88,83 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
+// ---------------------------------------------------------------------------
+// Streaming video from Drive
+// ---------------------------------------------------------------------------
+// A <video> element cannot attach an Authorization header, which is why videos
+// used to be downloaded whole as blobs before playing - unusable past a size
+// cap, and a 2003 camcorder tape is half a gigabyte. So the video element asks
+// for a same-origin URL, ./drive-media/<id>, and this worker plays proxy: it
+// forwards each byte-range request to Drive with the token attached and
+// streams the answer straight back. The browser then does what it does with
+// any ordinary video file - progressive playback, seeking, no full download.
+//
+// The token reaches the worker through IndexedDB, written by the page whenever
+// it obtains one (drive.js). Not memory: a worker is killed and restarted
+// constantly, and a variable would be gone by the second range request.
+
+const DB_NAME = 'family-dashboard';
+const KV_STORE = 'kv';
+
+function readDriveToken() {
+  return new Promise((resolve) => {
+    const open = indexedDB.open(DB_NAME, 1);
+    open.onupgradeneeded = () => open.result.createObjectStore(KV_STORE);
+    open.onerror = () => resolve(null);
+    open.onsuccess = () => {
+      try {
+        const get = open.result.transaction(KV_STORE, 'readonly').objectStore(KV_STORE).get('drive-token');
+        get.onsuccess = () => {
+          const saved = get.result;
+          resolve(saved?.token && saved.expiry > Date.now() ? saved.token : null);
+        };
+        get.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    };
+  });
+}
+
+async function streamDriveMedia(request, fileId) {
+  const token = await readDriveToken();
+  if (!fileId || !token) {
+    // 401 tells the page precisely what went wrong: refresh the token and ask
+    // again. Anything vaguer turns into "the video just doesn't work".
+    return new Response('', { status: 401, headers: { 'x-fd-media': 'no-token' } });
+  }
+
+  const headers = { Authorization: `Bearer ${token}` };
+  const range = request.headers.get('range');
+  if (range) headers.Range = range;
+
+  try {
+    const upstream = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`,
+      { headers },
+    );
+    // Pass the streaming body straight through with the headers seeking needs.
+    const passed = new Headers({ 'x-fd-media': 'stream' });
+    for (const name of ['content-type', 'content-length', 'content-range']) {
+      const value = upstream.headers.get(name);
+      if (value) passed.set(name, value);
+    }
+    passed.set('accept-ranges', 'bytes');
+    return new Response(upstream.body, { status: upstream.status, headers: passed });
+  } catch {
+    return new Response('', { status: 502, headers: { 'x-fd-media': 'upstream-failed' } });
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
+
+  const mediaMatch = /\/drive-media\/([^/?]+)/.exec(new URL(request.url).pathname);
+  if (mediaMatch) {
+    event.respondWith(streamDriveMedia(request, decodeURIComponent(mediaMatch[1])));
+    return;
+  }
 
   // "What is live right now?" probes must reach the server. Answering them
   // from a cache would make the update check agree with itself forever.

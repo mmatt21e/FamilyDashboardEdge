@@ -813,38 +813,70 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
   );
 
   void (async () => {
-    // Videos play rather than merely showing their poster frame. The bytes
-    // come the same way a photo's do - an authenticated fetch into a blob -
-    // because a plain <video src> cannot carry the Drive token. That means
-    // the whole file downloads before playback, which is fine for phone
-    // clips and hopeless for an hour of camcorder tape; past a cap, the
-    // honest answer is Drive's own player, which streams properly.
+    // Videos STREAM. A <video> element cannot attach the Drive token itself,
+    // so it asks for a same-origin ./drive-media/<id> URL and the service
+    // worker plays proxy - forwarding each range request to Drive with the
+    // token attached. The browser then treats it like any ordinary video
+    // file: progressive playback, seeking, no size limit and no download of
+    // the whole thing first. The 474MB camcorder tape starts in seconds.
     if (record.kind === KIND.VIDEO) {
-      if (record.size && record.size > VIDEO_PLAY_MAX_BYTES) {
-        img.replaceWith(el('div', { class: 'viewer__video-note' },
-          el('p', {}, `This video is ${formatSize(record.size)} — too big to load here in one go.`),
-          el('a', {
-            class: 'btn btn--onDark', target: '_blank', rel: 'noopener',
-            href: `https://drive.google.com/file/d/${record.driveId}/view`,
-          }, 'Play it in Drive'),
-        ));
+      const driveEscape = (message) => el('div', { class: 'viewer__video-note' },
+        el('p', {}, message),
+        el('a', {
+          class: 'btn btn--onDark', target: '_blank', rel: 'noopener',
+          href: `https://drive.google.com/file/d/${record.driveId}/view`,
+        }, 'Play it in Drive'),
+      );
+
+      const streaming = Boolean(navigator.serviceWorker?.controller);
+
+      // Only the fallback path - a first-ever visit the worker does not
+      // control yet - still downloads whole files, so only it keeps the cap.
+      if (!streaming && record.size && record.size > VIDEO_PLAY_MAX_BYTES) {
+        img.replaceWith(driveEscape(
+          `This video is ${formatSize(record.size)} — too big to load here in one go.`));
         return;
       }
 
       const note = el('div', { class: 'viewer__video-note' },
-        spinner(record.size ? `Loading video — ${formatSize(record.size)}…` : 'Loading video…'));
+        spinner(streaming ? 'Starting video…'
+          : (record.size ? `Loading video — ${formatSize(record.size)}…` : 'Loading video…')));
       img.replaceWith(note);
+
       try {
         const video = el('video', {
           class: 'viewer__img', controls: '', playsinline: '', autoplay: '',
           poster: record.thumbnailUrl ?? undefined,
         });
-        video.src = await fetchCachedBlobUrl(record.driveId);
         // Tapping the controls must not fall through to "close the viewer".
         video.addEventListener('click', (event) => event.stopPropagation());
+
+        if (streaming) {
+          // The worker reads the token from IndexedDB; fetching one here
+          // guarantees what it finds there is fresh.
+          await getAccessToken({ clientId: state.config.googleClientId });
+
+          // One retry with a fresh token covers a stream that outlived its
+          // hour. A second failure is a codec the browser cannot decode -
+          // 2003 camcorder MPEG is the usual culprit - and Drive's own
+          // player transcodes, so it is the honest place to send those.
+          let retried = false;
+          video.addEventListener('error', async () => {
+            if (!retried) {
+              retried = true;
+              await getAccessToken({ clientId: state.config.googleClientId }).catch(() => {});
+              video.load();
+              return;
+            }
+            video.replaceWith(driveEscape('This video is in a format the browser cannot play.'));
+          });
+          video.src = `drive-media/${encodeURIComponent(record.driveId)}`;
+        } else {
+          video.src = await fetchCachedBlobUrl(record.driveId);
+        }
         note.replaceWith(video);
       } catch {
-        note.replaceWith(el('p', { class: 'error-text' }, 'Could not load this video.'));
+        note.replaceWith(driveEscape('Could not load this video.'));
       }
       return;
     }

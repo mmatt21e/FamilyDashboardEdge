@@ -28,6 +28,8 @@
  * myaccount.google.com/permissions at any time.
  */
 
+import { cacheSet, cacheDelete } from './local-cache.js';
+
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
 const SCOPES = 'https://www.googleapis.com/auth/drive';
 
@@ -103,6 +105,11 @@ function rememberToken(token, expiry) {
   try {
     sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiry, scope: SCOPES }));
   } catch { /* private mode; it just re-requests next time */ }
+  // Mirrored into IndexedDB for ONE reader: the service worker, which streams
+  // video by attaching this token to range requests and cannot see session
+  // storage. Expiry-checked on that side, and cleared with the rest on
+  // forget - the mirror never outlives the token's hour of usefulness.
+  void cacheSet('drive-token', { token, expiry });
 }
 
 function recallToken() {
@@ -220,6 +227,7 @@ export function forgetDriveAccess() {
   accessToken = null;
   tokenExpiry = 0;
   try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* nothing to do */ }
+  void cacheDelete('drive-token');
 }
 
 /**
