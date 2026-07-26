@@ -37,6 +37,7 @@ export const KIND = {
  */
 export const MANAGED = {
   IMAGES: 'Dashboard_Image_Storage',
+  VIDEOS: 'Dashboard_Video_Storage',
   DOCUMENTS: 'Dashboard_Document_Storage',
   ARCHIVE: 'Archive',
   EVENTS: 'Events',
@@ -113,9 +114,16 @@ export function personFolderPath(name) {
 export function uploadPathFor({ kind = KIND.PHOTO, person = null, date = new Date() } = {}) {
   const when = date instanceof Date && !Number.isNaN(date.getTime()) ? date : new Date();
   const year = String(when.getFullYear());
+  const month = `${year}-${pad(when.getMonth() + 1)}`;
 
-  if (kind === KIND.PHOTO || kind === KIND.VIDEO) {
-    return [...personFolderPath(person), `${year}-${pad(when.getMonth() + 1)}`];
+  // Videos get a store of their own, mirroring the photo one - person, then
+  // month. Mixed in with photos they made both libraries worse: a video is
+  // found by "that trip", not by scrolling a photo grid hoping for a ▶ badge.
+  if (kind === KIND.VIDEO) {
+    return [MANAGED.VIDEOS, folderSafeName(person), month];
+  }
+  if (kind === KIND.PHOTO) {
+    return [...personFolderPath(person), month];
   }
   return [MANAGED.DOCUMENTS, year];
 }

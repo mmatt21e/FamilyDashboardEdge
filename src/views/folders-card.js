@@ -78,7 +78,7 @@ export function foldersCard() {
   card.replaceChildren(
     el('h2', {}, 'Shared folder structure'),
     el('p', { class: 'muted small' },
-      'The app keeps the shared Drive folder tidy: four folders at the top, and one '
+      'The app keeps the shared Drive folder tidy: five folders at the top, and one '
       + 'inside the photo folder for each person. It builds them on its own the first '
       + 'time anyone opens Photos — this is for checking, or for adding a new '
       + 'person’s folder straight away.'),

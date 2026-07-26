@@ -1844,8 +1844,15 @@ describe('where a new file is put', () => {
   test('photos go under the person who added them, then by month', () => {
     assert.deepEqual(uploadPathFor({ kind: 'photo', person: 'Jocey', date: july }),
       ['Dashboard_Image_Storage', 'Jocey', '2026-07']);
+  });
+
+  // Mixed in with photos, videos made both libraries worse: found by "that
+  // trip", not by scrolling a photo grid hoping for a play badge.
+  test('videos get a store of their own, mirroring the photo one', () => {
     assert.deepEqual(uploadPathFor({ kind: 'video', person: 'Dad', date: july }),
-      ['Dashboard_Image_Storage', 'Dad', '2026-07']);
+      ['Dashboard_Video_Storage', 'Dad', '2026-07']);
+    assert.equal(ownerFromPath(['Dashboard_Video_Storage', 'Dad', '2026-07']), 'Dad',
+      'the video store must organise, not become an owner');
   });
 
   test('documents go by year, because nobody looks for a letter by month', () => {
@@ -1911,10 +1918,12 @@ describe('folders for family members', () => {
     assert.deepEqual(personFolderPath('Jocey'), ['Dashboard_Image_Storage', 'Jocey']);
   });
 
-  // Four at the top, forever - however many people join. That is the difference
-  // between a folder that stays legible and one that grows an entry per person.
+  // A fixed handful at the top, forever - however many people join. That is
+  // the difference between a folder that stays legible and one that grows an
+  // entry per person.
   test('the shared root has a fixed set of folders', () => {
-    assert.equal(ROOT_FOLDERS.length, 4);
+    assert.equal(ROOT_FOLDERS.length, 5);
+    assert.ok(ROOT_FOLDERS.some((f) => f.name === 'Dashboard_Video_Storage'));
     assert.ok(ROOT_FOLDERS.every((f) => f.name && f.purpose));
   });
 });

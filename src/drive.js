@@ -541,6 +541,26 @@ export async function uploadFile(file, { folderId, clientId, onProgress, path = 
   });
 }
 
+/**
+ * Moves a file between folders.
+ *
+ * Only works on files THIS APP uploaded: the drive.file scope grants write
+ * access to the app's own files and nothing else, so a video PhotoSync put in
+ * the wrong place comes back 403 from here. Callers must treat that as the
+ * expected answer for most of the library, not as a failure to retry.
+ */
+export async function moveFile(fileId, { fromId, toId, clientId } = {}) {
+  const params = new URLSearchParams({
+    addParents: toId, removeParents: fromId, fields: 'id,parents',
+  });
+  return driveFetch(`files/${fileId}?${params}`, {
+    clientId,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+}
+
 /** Confirms the configured folder exists and is readable, for the Setup screen. */
 export async function checkFolder(folderId, { clientId } = {}) {
   const data = await driveFetch(`files/${folderId}?fields=id,name,mimeType`, { clientId });

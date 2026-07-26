@@ -24,6 +24,7 @@ export const state = {
   fileError: null,
   scanProgress: null,   // {files, folders} while the Drive walk is running
   scanTruncated: false, // the library is bigger than one scan will collect
+  misfiledVideos: 0,    // videos in the photo folders the app cannot move
 };
 
 export function subscribe(listener) {

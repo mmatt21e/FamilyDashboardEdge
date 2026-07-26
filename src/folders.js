@@ -13,13 +13,14 @@
  *     Family Dashboard/
  *     ├── Archive/                     the one-off import of the old library
  *     ├── Events/                      named occasions
- *     ├── Dashboard_Image_Storage/     every photo and video
- *     │   ├── Dad/  Mom/  Jocey/       a folder per family member
+ *     ├── Dashboard_Image_Storage/     photos, a folder per family member
+ *     │   ├── Dad/  Mom/  Jocey/
  *     │   └── Shared/                  when we do not know whose it is
+ *     ├── Dashboard_Video_Storage/     videos, mirroring the photo store
  *     └── Dashboard_Document_Storage/  everything that is not a photo
  *         └── 2026/
  *
- * The root holds four folders and only ever four, however many people join -
+ * The root holds five folders and only ever five, however many people join -
  * new members get a folder inside the image store, not another one at the top.
  * That is the difference between a folder that stays legible and one that grows
  * a new entry every time somebody signs in.
@@ -45,7 +46,8 @@ import { MANAGED, folderSafeName, personFolderPath } from './files.js';
 export const ROOT_FOLDERS = [
   { name: MANAGED.ARCHIVE, purpose: 'Older photos imported in one go, filed by year.' },
   { name: MANAGED.EVENTS, purpose: 'Holidays, weddings and days out, one folder each.' },
-  { name: MANAGED.IMAGES, purpose: 'Photos and videos, in a folder per person.' },
+  { name: MANAGED.IMAGES, purpose: 'Photos, in a folder per person.' },
+  { name: MANAGED.VIDEOS, purpose: 'Videos, in a folder per person.' },
   { name: MANAGED.DOCUMENTS, purpose: 'Anything that is not a photo, filed by year.' },
 ];
 

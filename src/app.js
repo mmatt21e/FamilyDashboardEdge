@@ -20,7 +20,7 @@ import { setAccountHint } from './drive.js';
 
 import { setupView, signInView } from './views/setup.js';
 import { settingsView } from './views/settings.js';
-import { photosView, memoriesView } from './views/photos.js';
+import { photosView, videosView, memoriesView } from './views/photos.js';
 import { feedView, calendarView } from './views/feed.js';
 import { onboardingView } from './views/onboarding.js';
 import { importTagsView, primeCatalog } from './views/import-tags.js';
@@ -258,6 +258,7 @@ function registerRoutes() {
 
   router.route('/', homeView);
   router.route('/photos', gated('photos', photosView));
+  router.route('/videos', gated('videos', videosView));
   router.route('/memories', gated('memories', memoriesView));
   router.route('/feed', gated('feed', feedView));
   router.route('/calendar', gated('calendar', calendarView));

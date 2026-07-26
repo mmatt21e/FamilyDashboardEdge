@@ -17,6 +17,7 @@ and it never handles anyone else's data.
 | Sign in with your own Google account | Working |
 | **Photos** — everything in the shared Drive folder | Working |
 | **Filter photos** by who is in them, year, month, event, folder or text | Working |
+| **Videos** — their own library, year wall and in-app playback | Working |
 | **Tag and correct photos by hand** — people, event, date | Working |
 | One-tap tagging in the photo viewer | Working |
 | **Invite people from inside the app** | Working |
@@ -387,15 +388,16 @@ Family Dashboard/                  ← the shared folder (your driveFolderId)
 │   └── 2015/2015-09/…
 ├── Events/                        named occasions, one folder each
 │   └── 2014 Cruise/…
-├── Dashboard_Image_Storage/       every photo and video
+├── Dashboard_Image_Storage/       photos
 │   ├── Dad/  Mom/  Jocey/  Matt/  a folder per person, made as people join
 │   │   └── 2026-07/…              app uploads land here, by month
 │   └── Shared/                    when we don't know whose it is
+├── Dashboard_Video_Storage/       videos, mirroring the photo store
 └── Dashboard_Document_Storage/    anything that isn't a photo
     └── 2026/
 ```
 
-**Four folders at the top, forever** — however many people join. That is the
+**Five folders at the top, forever** — however many people join. That is the
 whole point: a new member gets a folder inside the photo store, not another
 entry at the root. Uploads from the app go under whoever added them and then by
 month, so nothing is ever dropped loose in the shared folder.

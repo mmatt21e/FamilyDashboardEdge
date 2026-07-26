@@ -39,6 +39,7 @@ export const MODULES = [
 
   // --- priority modules -----------------------------------------------------
   { key: 'photos',    group: 'daily', title: 'Photos',        icon: '📷', status: 'ready', defaultOn: true,  desc: 'Everyone\'s photos from the shared folder, newest first.' },
+  { key: 'videos',    group: 'daily', title: 'Videos',        icon: '🎬', status: 'ready', defaultOn: true,  desc: 'The family\'s videos, in their own library.' },
   { key: 'memories',  group: 'daily', title: 'Memories',      icon: '🕰️', status: 'ready', defaultOn: true,  desc: 'On this day: what you were doing a year, four years, ten years ago.' },
   { key: 'feed',      group: 'daily', title: 'Message board', icon: '💬', status: 'ready', defaultOn: true,  desc: 'Short updates and photos, together in one feed.' },
   { key: 'calendar',  group: 'calendar', title: 'Calendar',   icon: '📅', status: 'ready', defaultOn: true,  desc: 'Visits, travel and when everyone is seeing each other.' },

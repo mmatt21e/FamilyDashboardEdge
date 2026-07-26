@@ -10,10 +10,13 @@ import { el, spinner, emptyState, toast, formatDate, children } from '../ui.js';
 import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
-import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess, getAccessToken } from '../drive.js';
+import {
+  listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess, getAccessToken,
+  moveFile, ensureFolderPath,
+} from '../drive.js';
 import { cacheGet, cacheSet } from '../local-cache.js';
 import { knownThumb, thumbFromDisk, fetchAndCacheThumb } from '../thumbs.js';
-import { toPointerRecord, sortByTakenDesc, uploadPathFor, kindForMime, KIND } from '../files.js';
+import { toPointerRecord, sortByTakenDesc, uploadPathFor, kindForMime, formatSize, MANAGED, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
 import { provisionStructure } from '../folders.js';
 import { applyCatalog } from '../catalog.js';
@@ -100,6 +103,9 @@ function withEdits(records) {
   for (const record of merged) recordIndex.set(record.driveId, record);
   return merged;
 }
+
+/** Videos larger than this play in Drive's own streaming player instead. */
+const VIDEO_PLAY_MAX_BYTES = 300_000_000;
 
 /** How many records the on-device snapshot keeps. Plenty past the scan cap. */
 const SNAPSHOT_MAX = 25_000;
@@ -195,6 +201,7 @@ async function doLoad() {
 
     void persistNewPointers(records);
     void ensureStructureOnce();
+    void relocateVideos(scan.items);
   } catch (error) {
     // Translate into something the family can act on, rather than a raw status.
     const diagnosis = interpretDriveFailure(
@@ -202,6 +209,54 @@ async function doLoad() {
       { projectId: state.config?.firebase?.projectId, folderId: state.config?.driveFolderId },
     );
     update({ loadingFiles: false, fileError: diagnosis });
+  }
+}
+
+/**
+ * Puts videos the app uploaded into the video store.
+ *
+ * Every scan looks for videos filed under the photo store and moves them to
+ * the mirrored spot under the video one. Only the app's own uploads CAN move -
+ * drive.file grants write access to nothing else - so a video PhotoSync
+ * dropped with the photos comes back 403. Those are remembered for the
+ * session (retrying every scan would hammer Drive for guaranteed refusals),
+ * counted, and reported in the Videos view as a drag-in-Drive job, because a
+ * tidy the app silently cannot finish looks exactly like a bug.
+ */
+const MOVES_PER_SCAN = 25;
+const unmovable = new Set();
+
+async function relocateVideos(scanItems) {
+  try {
+    const misfiled = scanItems.filter(({ file, path }) =>
+      (file.mimeType ?? '').startsWith('video/')
+      && path[0] === MANAGED.IMAGES
+      && !unmovable.has(file.id));
+
+    let stuck = 0;
+    for (const { file, path } of misfiled.slice(0, MOVES_PER_SCAN)) {
+      try {
+        const target = await ensureFolderPath(
+          state.config.driveFolderId,
+          [MANAGED.VIDEOS, ...path.slice(1)],
+          { clientId: state.config.googleClientId },
+        );
+        await moveFile(file.id, {
+          fromId: file.parents?.[0],
+          toId: target,
+          clientId: state.config.googleClientId,
+        });
+      } catch {
+        unmovable.add(file.id);
+        stuck += 1;
+      }
+    }
+    // Everything beyond this scan's batch is neither moved nor known-stuck;
+    // count only what was actually refused, so the notice never overstates.
+    const remembered = misfiled.filter(({ file }) => unmovable.has(file.id)).length;
+    update({ misfiledVideos: Math.max(stuck, remembered) });
+  } catch {
+    // Tidying is a courtesy. The libraries are split by kind either way.
   }
 }
 
@@ -758,6 +813,42 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
   );
 
   void (async () => {
+    // Videos play rather than merely showing their poster frame. The bytes
+    // come the same way a photo's do - an authenticated fetch into a blob -
+    // because a plain <video src> cannot carry the Drive token. That means
+    // the whole file downloads before playback, which is fine for phone
+    // clips and hopeless for an hour of camcorder tape; past a cap, the
+    // honest answer is Drive's own player, which streams properly.
+    if (record.kind === KIND.VIDEO) {
+      if (record.size && record.size > VIDEO_PLAY_MAX_BYTES) {
+        img.replaceWith(el('div', { class: 'viewer__video-note' },
+          el('p', {}, `This video is ${formatSize(record.size)} — too big to load here in one go.`),
+          el('a', {
+            class: 'btn btn--onDark', target: '_blank', rel: 'noopener',
+            href: `https://drive.google.com/file/d/${record.driveId}/view`,
+          }, 'Play it in Drive'),
+        ));
+        return;
+      }
+
+      const note = el('div', { class: 'viewer__video-note' },
+        spinner(record.size ? `Loading video — ${formatSize(record.size)}…` : 'Loading video…'));
+      img.replaceWith(note);
+      try {
+        const video = el('video', {
+          class: 'viewer__img', controls: '', playsinline: '', autoplay: '',
+          poster: record.thumbnailUrl ?? undefined,
+        });
+        video.src = await fetchCachedBlobUrl(record.driveId);
+        // Tapping the controls must not fall through to "close the viewer".
+        video.addEventListener('click', (event) => event.stopPropagation());
+        note.replaceWith(video);
+      } catch {
+        note.replaceWith(el('p', { class: 'error-text' }, 'Could not load this video.'));
+      }
+      return;
+    }
+
     const fromBlob = async () => {
       try {
         // Shared with the grid's fallback: a photo whose tile already fell
@@ -803,9 +894,9 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
  * Leaving the sheet blank and pressing Upload is a perfectly good answer; no
  * correction is written for a field nobody filled in.
  */
-function uploadButton() {
-  const input = el('input', { type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true });
-  const button = el('button', { class: 'btn btn--primary' }, 'Add photos');
+function uploadButton({ accept = 'image/*,video/*', label = 'Add photos' } = {}) {
+  const input = el('input', { type: 'file', accept, multiple: true, hidden: true });
+  const button = el('button', { class: 'btn btn--primary' }, label);
   const progress = el('div', { class: 'muted small' });
 
   button.addEventListener('click', () => input.click());
@@ -907,22 +998,21 @@ async function tagUploaded(uploaded, values) {
 // ---------------------------------------------------------------------------
 
 /**
- * Kept outside the view function so the filters survive a trip to Memories and
- * back. Losing your filters because you glanced at another screen is the
- * single most irritating thing a photo app can do.
- */
-let filters = emptyFilters();
-
-/**
- * Photos opens onto the year wall, not the grid.
+ * Photos and Videos are the same machinery pointed at different kinds, and
+ * each keeps its own filters and its own place on the year wall. Shared state
+ * here would mean picking 2015 in Videos silently filtering Photos too. Like
+ * the filters always have, the state survives a trip to another tab - coming
+ * back mid-browse should not reset to the start.
  *
- * Partly navigation, mostly performance: the wall renders two dozen cards
- * where the grid renders two hundred tiles, so the screen a person lands on
- * is always light, and a year's grid is a few hundred photos instead of the
- * whole archive. Like the filters, the mode survives a trip to another tab -
- * coming back mid-browse should not reset to the start.
+ * The wall itself is as much performance as navigation: it renders two dozen
+ * cards where the grid renders two hundred tiles, so the screen a person
+ * lands on is always light, and a year's grid is a few hundred items instead
+ * of the whole archive.
  */
-let viewMode = 'years';
+const libraryState = {
+  [KIND.PHOTO]: { filters: emptyFilters(), mode: 'years' },
+  [KIND.VIDEO]: { filters: emptyFilters(), mode: 'years' },
+};
 
 /**
  * The photo a year card wears.
@@ -952,7 +1042,7 @@ function coverFor(year, records) {
  * claim. Every card says how many photos stand behind it, so the wall doubles
  * as a map of where the library's weight is.
  */
-function yearWallView(records, { onYear, onAll, onUndated }) {
+function yearWallView(records, { onYear, onAll, onUndated, noun = 'photo' }) {
   const wall = yearWall(records);
   const [hero, ...restYears] = wall.years;
   const rest = new Set(restYears.map((y) => y.year));
@@ -968,7 +1058,7 @@ function yearWallView(records, { onYear, onAll, onUndated }) {
       el('span', { class: 'year-card__text' },
         el('span', { class: 'year-card__year' }, String(entry.year)),
         el('span', { class: 'year-card__count' },
-          `${entry.count.toLocaleString()} ${entry.count === 1 ? 'photo' : 'photos'}`),
+          `${entry.count.toLocaleString()} ${entry.count === 1 ? noun : `${noun}s`}`),
       ),
     );
     node.addEventListener('click', () => onYear(entry.year));
@@ -986,7 +1076,7 @@ function yearWallView(records, { onYear, onAll, onUndated }) {
       el('span', { class: 'year-card__text' },
         el('span', { class: 'year-card__year' }, 'No date'),
         el('span', { class: 'year-card__count' },
-          `${wall.undated.toLocaleString()} ${wall.undated === 1 ? 'photo' : 'photos'}`),
+          `${wall.undated.toLocaleString()} ${wall.undated === 1 ? noun : `${noun}s`}`),
       ),
     );
     node.addEventListener('click', onUndated);
@@ -1031,7 +1121,7 @@ function selectFilter({ label, anyLabel, options, value, format = (o) => o.label
  * popover: it opens, closes and takes the keyboard correctly without a line of
  * positioning code.
  */
-function peopleFilter(facets, onChange) {
+function peopleFilter(filters, facets, onChange) {
   const summaryText = filters.people.length
     ? filters.people.join(' + ')
     : 'Anyone';
@@ -1110,7 +1200,7 @@ function peopleFilter(facets, onChange) {
   return wrap;
 }
 
-function filterBar(facets, onChange) {
+function filterBar(filters, facets, onChange) {
   const bar = el('div', { class: 'filterbar' });
 
   const search = el('input', {
@@ -1125,7 +1215,7 @@ function filterBar(facets, onChange) {
   });
 
   bar.append(...children(
-    peopleFilter(facets, onChange),
+    peopleFilter(filters, facets, onChange),
 
     facets.years.length > 1 && selectFilter({
       label: 'Year', anyLabel: 'Any year', options: facets.years, value: filters.year,
@@ -1159,7 +1249,7 @@ function filterBar(facets, onChange) {
   return bar;
 }
 
-function activeChips(facets, onChange) {
+function activeChips(filters, facets, onChange) {
   const chips = describeFilters(filters, facets);
   if (!chips.length) return null;
 
@@ -1216,8 +1306,38 @@ function photoGrid(records, onOpen) {
 // Views
 // ---------------------------------------------------------------------------
 
-export async function photosView() {
+/** What each library calls itself, and how its screens speak. */
+const LIBRARY_COPY = {
+  [KIND.PHOTO]: {
+    title: 'Photos',
+    accept: 'image/*',
+    addLabel: 'Add photos',
+    emptyIcon: '📷',
+    emptyTitle: 'No photos yet',
+    emptyDetail: 'Once PhotoSync is set up on a phone, photos appear here on their own. You can also add some directly.',
+  },
+  [KIND.VIDEO]: {
+    title: 'Videos',
+    accept: 'video/*',
+    addLabel: 'Add videos',
+    emptyIcon: '🎬',
+    emptyTitle: 'No videos yet',
+    emptyDetail: 'Videos from the shared folder appear here, separately from the photos. You can also add some directly.',
+  },
+};
+
+export function photosView() {
+  return libraryView(KIND.PHOTO);
+}
+
+export function videosView() {
+  return libraryView(KIND.VIDEO);
+}
+
+async function libraryView(kind) {
   const container = el('div', { class: 'view' });
+  const copy = LIBRARY_COPY[kind];
+  const st = libraryState[kind];
 
   const barSlot = el('div', { class: 'filterbar-slot' });
   const chipSlot = el('div', {});
@@ -1243,18 +1363,18 @@ export async function photosView() {
    * every keystroke.
    */
   function onFilterChange(next, { keepBar = false } = {}) {
-    filters = next;
+    st.filters = next;
     drawResults({ keepBar });
   }
 
   function media() {
-    return state.files.filter((f) => f.kind === KIND.PHOTO || f.kind === KIND.VIDEO);
+    return state.files.filter((f) => f.kind === kind);
   }
 
   function drawResults({ keepBar = false } = {}) {
     const all = media();
     const facets = buildFacets(all);
-    const shown = filterPhotos(all, filters);
+    const shown = filterPhotos(all, st.filters);
 
     // Rebuilding the bar closes the people menu, and the bar is rebuilt at
     // moments the person did not cause: the scan finishing in the background,
@@ -1263,23 +1383,22 @@ export async function photosView() {
     // after - with fresh contents, which is what the rebuild was for.
     const menuWasOpen = Boolean(barSlot.querySelector('.filter[open]'));
     if (!keepBar) {
-      barSlot.replaceChildren(filterBar(facets, onFilterChange));
+      barSlot.replaceChildren(filterBar(st.filters, facets, onFilterChange));
       if (menuWasOpen) {
         const rebuilt = barSlot.querySelector('.filter');
         if (rebuilt) rebuilt.open = true;
       }
     }
-    chipSlot.replaceChildren(...children(activeChips(facets, onFilterChange)));
+    chipSlot.replaceChildren(...children(activeChips(st.filters, facets, onFilterChange)));
     countSlot.textContent = describeCount(shown.length, all.length);
 
     if (all.length === 0) {
-      gridSlot.replaceChildren(emptyState('📷', 'No photos yet',
-        'Once PhotoSync is set up on a phone, photos appear here on their own. You can also add some directly.'));
+      gridSlot.replaceChildren(emptyState(copy.emptyIcon, copy.emptyTitle, copy.emptyDetail));
       return;
     }
     if (shown.length === 0) {
       gridSlot.replaceChildren(emptyState('🔍', 'Nothing matches',
-        'No photos match every filter at once. Try removing one.',
+        'Nothing matches every filter at once. Try removing one.',
         el('button', { class: 'btn', onClick: () => onFilterChange(emptyFilters()) }, 'Clear filters')));
       return;
     }
@@ -1315,6 +1434,10 @@ export async function photosView() {
     }
 
     const notices = [
+      kind === KIND.VIDEO && state.misfiledVideos > 0 && el('p', { class: 'notice' },
+        `${state.misfiledVideos} ${state.misfiledVideos === 1 ? 'video lives' : 'videos live'} in the photo folders. `
+        + 'The app can only move files it uploaded itself — dragging the rest into '
+        + `${MANAGED.VIDEOS} in Drive tidies them for good. They play here either way.`),
       state.fileError && el('p', { class: 'notice' },
         `Showing the photos from last time — ${state.fileError.title ?? 'the shared folder could not be refreshed'}. `,
         el('button', { class: 'link-btn', type: 'button', onClick: retryScan }, 'Try again'),
@@ -1330,27 +1453,28 @@ export async function photosView() {
     const all = media();
     const wallWorthwhile = yearWall(all).years.length >= 2;
 
-    if (viewMode === 'years' && wallWorthwhile) {
+    if (st.mode === 'years' && wallWorthwhile) {
       container.replaceChildren(...children(
         el('header', { class: 'view__header' },
-          el('h1', {}, 'Photos'),
+          el('h1', {}, copy.title),
           el('span', { class: 'muted small' }, `${all.length.toLocaleString()} in the library`),
         ),
         ...notices,
         yearWallView(all, {
+          noun: kind === KIND.VIDEO ? 'video' : 'photo',
           onYear: (year) => {
-            filters = { ...emptyFilters(), year };
-            viewMode = 'grid';
+            st.filters = { ...emptyFilters(), year };
+            st.mode = 'grid';
             draw();
           },
           onAll: () => {
-            filters = emptyFilters();
-            viewMode = 'grid';
+            st.filters = emptyFilters();
+            st.mode = 'grid';
             draw();
           },
           onUndated: () => {
-            filters = { ...emptyFilters(), undatedOnly: true };
-            viewMode = 'grid';
+            st.filters = { ...emptyFilters(), undatedOnly: true };
+            st.mode = 'grid';
             draw();
           },
         }),
@@ -1360,17 +1484,17 @@ export async function photosView() {
 
     const backToYears = wallWorthwhile && el('button', {
       class: 'back', type: 'button',
-      onClick: () => { viewMode = 'years'; draw(); },
+      onClick: () => { st.mode = 'years'; draw(); },
     }, el('span', { class: 'back__chevron', 'aria-hidden': 'true' }, '‹'), 'Years');
 
     container.replaceChildren(...children(
       el('header', { class: 'view__header' },
         backToYears,
-        el('h1', {}, filters.year ? String(filters.year) : 'Photos'),
+        el('h1', {}, st.filters.year ? String(st.filters.year) : copy.title),
         countSlot,
       ),
       ...notices,
-      uploadButton(),
+      uploadButton({ accept: copy.accept, label: copy.addLabel }),
       barSlot,
       chipSlot,
       gridSlot,
