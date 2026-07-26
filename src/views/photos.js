@@ -820,13 +820,30 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
     // file: progressive playback, seeking, no size limit and no download of
     // the whole thing first. The 474MB camcorder tape starts in seconds.
     if (record.kind === KIND.VIDEO) {
-      const driveEscape = (message) => el('div', { class: 'viewer__video-note' },
-        el('p', {}, message),
-        el('a', {
-          class: 'btn btn--onDark', target: '_blank', rel: 'noopener',
-          href: `https://drive.google.com/file/d/${record.driveId}/view`,
-        }, 'Play it in Drive'),
-      );
+      // Drive transcodes every video on its servers and its /preview page is
+      // built to be embedded, so a format the browser's own decoder rejects -
+      // 2003 camcorder MPEG being the house speciality - still plays right
+      // here in the viewer, through Drive's player. The external link stays
+      // underneath for the one case the embed can't cover: a browser that
+      // isn't signed in to Google, where Drive's page asks for a sign-in the
+      // iframe can't complete.
+      const driveEscape = (message) => {
+        const wrap = el('div', { class: 'viewer__video-note viewer__video-note--embed' },
+          el('p', {}, message),
+          el('iframe', {
+            class: 'viewer__drive-embed',
+            src: `https://drive.google.com/file/d/${encodeURIComponent(record.driveId)}/preview`,
+            allow: 'autoplay; fullscreen',
+            allowfullscreen: '',
+          }),
+          el('a', {
+            class: 'btn btn--onDark', target: '_blank', rel: 'noopener',
+            href: `https://drive.google.com/file/d/${record.driveId}/view`,
+          }, 'If it will not play here, open it in Drive'),
+        );
+        wrap.addEventListener('click', (event) => event.stopPropagation());
+        return wrap;
+      };
 
       const streaming = Boolean(navigator.serviceWorker?.controller);
 
@@ -834,7 +851,7 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
       // control yet - still downloads whole files, so only it keeps the cap.
       if (!streaming && record.size && record.size > VIDEO_PLAY_MAX_BYTES) {
         img.replaceWith(driveEscape(
-          `This video is ${formatSize(record.size)} — too big to load here in one go.`));
+          `This video is ${formatSize(record.size)} — playing it through Drive’s player instead.`));
         return;
       }
 
@@ -857,9 +874,8 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
           await getAccessToken({ clientId: state.config.googleClientId });
 
           // One retry with a fresh token covers a stream that outlived its
-          // hour. A second failure is a codec the browser cannot decode -
-          // 2003 camcorder MPEG is the usual culprit - and Drive's own
-          // player transcodes, so it is the honest place to send those.
+          // hour. A second failure is a codec the browser cannot decode, and
+          // those switch over to the embedded Drive player above.
           let retried = false;
           video.addEventListener('error', async () => {
             if (!retried) {
@@ -868,7 +884,7 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
               video.load();
               return;
             }
-            video.replaceWith(driveEscape('This video is in a format the browser cannot play.'));
+            video.replaceWith(driveEscape('This format needs Drive’s player — playing it that way.'));
           });
           video.src = `drive-media/${encodeURIComponent(record.driveId)}`;
         } else {
@@ -876,7 +892,7 @@ function openViewer(record, { onFilterPerson = null, onEdit = null, onChanged = 
         }
         note.replaceWith(video);
       } catch {
-        note.replaceWith(driveEscape('Could not load this video.'));
+        note.replaceWith(driveEscape('Could not stream this video directly — using Drive’s player.'));
       }
       return;
     }

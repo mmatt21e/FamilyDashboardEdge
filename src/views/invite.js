@@ -3,7 +3,7 @@
  *
  * Three things live here:
  *
- *   1. the card in Settings that creates and manages invitations
+ *   1. the card in Settings that creates, emails and manages invitations
  *   2. the "add this to your home screen" step an invited person lands on
  *   3. the screen shown when somebody signs in without being on the allowlist
  *
@@ -21,8 +21,9 @@ import * as fb from '../firebase.js';
 import { toSetupLink } from '../config.js';
 import {
   generateCode, buildInvitation, describeInvitation, toInviteLink,
-  inviteMessage, looksLikeEmail, normaliseEmail, DEFAULT_EXPIRY_DAYS,
+  inviteMessage, inviteSubject, looksLikeEmail, normaliseEmail, DEFAULT_EXPIRY_DAYS,
 } from '../invites.js';
+import { sendEmail } from '../gmail.js';
 import {
   installGuidance, promptToInstall, canPromptToInstall,
   dismissInstall, installDismissed, shouldOfferInstall,
@@ -68,30 +69,39 @@ export function forgetInvite() {
 
 export async function inviteCard() {
   const card = el('section', { class: 'card' });
-  card.replaceChildren(spinner('Loading invitations…'));
 
-  const draw = async () => {
+  // The list redraws on its own; the form is built once and left alone.
+  // Redrawing the whole card was how the "✓ Emailed" panel used to vanish
+  // the instant it appeared: creating an invitation refreshed the list, the
+  // refresh rebuilt the form, and the fresh form arrived empty.
+  const listSlot = el('div');
+  const drawList = async () => {
     let pending = [];
     try {
       pending = await fb.queryDocs('invitations', { orderBy: ['createdAt', 'desc'], limit: 50 });
     } catch {
-      // Rules not published yet. The form below still explains itself.
+      // Rules not published yet. The form above still explains itself.
     }
 
-    card.replaceChildren(...children(
-      el('h2', {}, 'Invite someone'),
-      el('p', { class: 'muted small' },
-        'Creates a link that sets their phone up, walks them through adding it to their '
-        + 'home screen, and lets them sign in with their own Google account.'),
-      inviteForm(draw),
+    listSlot.replaceChildren(...children(
       pending.length > 0 && el('div', { class: 'invite-list' },
         el('h3', {}, 'Invitations you have sent'),
-        pending.map((invitation) => inviteRow(invitation, draw)),
+        pending.map((invitation) => inviteRow(invitation, drawList)),
       ),
     ));
   };
 
-  await draw();
+  card.replaceChildren(
+    el('h2', {}, 'Invite someone'),
+    el('p', { class: 'muted small' },
+      'Enter their email and the dashboard emails them the invitation itself, from '
+      + 'your own address. The link sets their phone up, walks them through adding '
+      + 'it to their home screen, and lets them sign in with their own Google account.'),
+    inviteForm(drawList),
+    listSlot,
+  );
+
+  await drawList();
   return card;
 }
 
@@ -101,13 +111,20 @@ function inviteForm(onChanged) {
     class: 'input', type: 'email', placeholder: 'Their Google account email',
     autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false',
   });
-  const send = el('button', { class: 'btn btn--primary' }, 'Create invitation');
+  const send = el('button', { class: 'btn btn--primary' }, 'Send the invitation');
   const note = el('p', { class: 'muted small' },
-    'This creates the invitation and hands you the message. The dashboard has no '
-    + 'server and no mail account, so it cannot post it for you — you send it from '
-    + 'your own email or messages, which is also why it arrives from an address they '
-    + 'recognise.');
+    'The email is sent from your own Gmail address, so it arrives from someone they '
+    + 'recognise instead of a no-reply. The first time, Google asks you once for '
+    + 'permission to send email on your behalf.');
   const output = el('div');
+
+  // The button promises only what will actually happen: with an address the
+  // app sends the email itself; without one all it can do is hand over a link.
+  const relabel = () => {
+    send.textContent = email.value.trim() ? 'Send the invitation' : 'Create an invitation link';
+  };
+  email.addEventListener('input', relabel);
+  relabel();
 
   send.addEventListener('click', async () => {
     const address = normaliseEmail(email.value);
@@ -129,10 +146,16 @@ function inviteForm(onChanged) {
       await fb.setDoc('invitations', code, invitation, { merge: false });
 
       const link = toInviteLink(toSetupLink(state.config), code);
-      output.replaceChildren(sharePanel(invitation, link));
       name.value = '';
       email.value = '';
+      relabel();
       await onChanged?.();
+
+      if (address) {
+        await emailFlow({ invitation, link, output, onChanged });
+      } else {
+        output.replaceChildren(sharePanel(invitation, link));
+      }
     } catch (error) {
       toast(error?.message ?? 'Could not create the invitation', { error: true });
     } finally {
@@ -156,53 +179,128 @@ function inviteForm(onChanged) {
 }
 
 /**
- * The invitation, ready to send.
+ * Sending the email, and owning the result.
  *
- * **The app does not send anything.** It is a static site with no server and no
- * mail account, so there is nothing here that could put a message in somebody's
- * inbox. What it does is hand you the message and open whichever app actually
- * sends it - your mail client, or the phone's share sheet.
- *
- * That distinction was not clear enough before: the button said "Send it",
- * which reads as a promise the app cannot keep, and an invitation that was
- * never sent looks exactly like one that was lost.
+ * An earlier version of this screen handed over a mailto link and called it
+ * sending. On a computer with no mail app a mailto click does nothing at all -
+ * no error, no window - which from the outside is indistinguishable from the
+ * invitation being lost, and that is exactly what happened. Now the app sends
+ * the email itself through Gmail as the signed-in inviter (src/gmail.js), and
+ * this flow shows one of three honest states: sending, sent, or failed with
+ * the reason and a retry.
  */
+async function emailFlow({ invitation, link, output, onChanged }) {
+  const familyName = state.config?.familyName ?? 'our family';
+  const message = inviteMessage({
+    familyName,
+    fromName: state.member?.name?.split(' ')[0] ?? '',
+    link,
+  });
+
+  const attempt = async () => {
+    output.replaceChildren(el('div', { class: 'card card--inset' },
+      spinner(`Emailing ${invitation.email}…`)));
+
+    try {
+      await sendEmail({
+        to: invitation.email,
+        subject: inviteSubject(familyName),
+        body: message,
+        clientId: state.config?.googleClientId,
+        projectId: state.config?.firebase?.projectId ?? null,
+      });
+
+      // The stamp is what makes "did it actually go?" answerable later from
+      // the list below. If the write fails the email is out regardless, so a
+      // missing stamp must not be reported as a failed send.
+      await fb.setDoc('invitations', invitation.code, {
+        sentAt: new Date().toISOString(),
+        sentBy: state.user?.uid ?? null,
+      }).catch(() => {});
+
+      output.replaceChildren(sentPanel(invitation, link, message));
+      await onChanged?.();
+    } catch (error) {
+      output.replaceChildren(failedPanel({ invitation, link, message, error, retry: attempt }));
+    }
+  };
+
+  await attempt();
+}
+
+function sentPanel(invitation, link, message) {
+  return el('div', { class: 'card card--inset' },
+    el('h3', {}, `✓ Emailed to ${invitation.email}`),
+    el('p', { class: 'muted small' },
+      `It was sent from your own Gmail address, so tell ${invitation.name || 'them'} to `
+      + 'look for a message from you — and to check spam if it is not there. '
+      + `The invitation works for ${DEFAULT_EXPIRY_DAYS} days and only for ${invitation.email}.`),
+    el('details', {},
+      el('summary', { class: 'muted small' }, 'Send it another way too'),
+      el('div', { class: 'row' }, ...shareActions(invitation, link, message)),
+    ),
+  );
+}
+
+function failedPanel({ invitation, link, message, error, retry }) {
+  const retryButton = el('button', { class: 'btn btn--primary' }, 'Try sending again');
+  retryButton.addEventListener('click', retry);
+
+  return el('div', { class: 'card card--inset' },
+    el('h3', {}, 'The email did not go out'),
+    el('p', { class: 'error-text' }, error?.message ?? 'Sending failed.'),
+
+    // translateGmailFailure attaches the console page for the one failure
+    // with a real fix behind it: the Gmail API not yet enabled for the
+    // family's project.
+    error?.fixUrl && el('p', { class: 'small' },
+      el('a', { href: error.fixUrl, target: '_blank', rel: 'noopener' },
+        'Open the Google page where it is switched on')),
+
+    el('p', { class: 'muted small' },
+      'The invitation itself is saved and still valid — only the email failed. '
+      + 'Retry, or send the message yourself:'),
+    el('textarea', { class: 'input input--code', rows: 5, readonly: true }, message),
+    el('div', { class: 'row' }, retryButton, ...shareActions(invitation, link, message)),
+  );
+}
+
+/** A link-only invitation: nothing to email, so hand over the message. */
 function sharePanel(invitation, link) {
   const message = inviteMessage({
     familyName: state.config?.familyName ?? 'our family',
     fromName: state.member?.name?.split(' ')[0] ?? '',
     link,
   });
-  const subject = `Join ${state.config?.familyName ?? 'our family'}’s photo dashboard`;
 
-  // mailto opens the person's own mail app with everything filled in. It is the
-  // only way a site with no server can reach an inbox, and it has the pleasant
-  // side effect that the invitation comes from a real address the recipient
-  // recognises rather than a no-reply nobody trusts.
-  //
-  // Its failure mode is silent and common: a computer with no default mail app
-  // does NOTHING when a mailto link is clicked - no error, no window, nothing -
-  // and "I pressed Email and no invitation arrived" is exactly what that looks
-  // like from the outside. Hence the Gmail button beside it: a plain web link
-  // to Gmail's compose screen with everything filled in, which works in any
-  // browser signed in to Google - and this whole app runs on Google sign-in,
-  // so that is every member of this family by construction.
-  const email = invitation.email && el('a', {
-    class: 'btn btn--primary',
-    href: `mailto:${encodeURIComponent(invitation.email)}`
-      + `?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`,
-  }, `Email ${invitation.email}`);
+  return el('div', { class: 'card card--inset' },
+    el('h3', {}, invitation.name ? `Invitation for ${invitation.name}` : 'Invitation link ready'),
+    el('p', { class: 'muted small' },
+      'No email address was given, so nothing was emailed — share this message with '
+      + 'whoever it is for:'),
+    el('textarea', { class: 'input input--code', rows: 5, readonly: true }, message),
+    el('div', { class: 'row' }, ...shareActions(invitation, link, message)),
+    el('p', { class: 'muted small' },
+      `Works for ${DEFAULT_EXPIRY_DAYS} days, once, for whoever opens it. `
+      + 'It stays valid until it is used, so you can send it again if it goes astray.'),
+  );
+}
 
+/**
+ * The manual routes, kept as understudies: Gmail's compose screen filled in
+ * (works in any browser signed in to Google, which is the whole family by
+ * construction), the share sheet, and plain copying.
+ */
+function shareActions(invitation, link, message) {
   const gmail = invitation.email && el('a', {
     class: 'btn', target: '_blank', rel: 'noopener',
     href: 'https://mail.google.com/mail/?view=cm&fs=1'
       + `&to=${encodeURIComponent(invitation.email)}`
-      + `&su=${encodeURIComponent(subject)}`
+      + `&su=${encodeURIComponent(inviteSubject(state.config?.familyName ?? 'our family'))}`
       + `&body=${encodeURIComponent(message)}`,
-  }, 'Open in Gmail');
+  }, 'Write it in Gmail yourself');
 
-  const share = el('button', { class: invitation.email ? 'btn' : 'btn btn--primary' },
-    navigator.share ? 'Share…' : 'Copy the message');
+  const share = el('button', { class: 'btn' }, navigator.share ? 'Share…' : 'Copy the message');
   share.addEventListener('click', async () => {
     if (navigator.share) {
       try {
@@ -218,24 +316,7 @@ function sharePanel(invitation, link) {
   const copyLink = el('button', { class: 'btn' }, 'Copy just the link');
   copyLink.addEventListener('click', () => copy(link, 'Link copied'));
 
-  return el('div', { class: 'card card--inset' },
-    el('h3', {}, invitation.name ? `Invitation for ${invitation.name}` : 'Invitation ready'),
-
-    el('p', { class: 'muted small' },
-      'The invitation is saved. Nothing has been sent yet — pick how to send it:'),
-
-    el('textarea', { class: 'input input--code', rows: 5, readonly: true }, message),
-    el('div', { class: 'row' }, ...children(email, gmail, share, copyLink)),
-
-    invitation.email && el('p', { class: 'muted small' },
-      'If the Email button does nothing, this computer has no mail app set up — '
-      + 'use Open in Gmail instead, it works in any browser you are signed in to Google on.'),
-
-    el('p', { class: 'muted small' },
-      `Works for ${DEFAULT_EXPIRY_DAYS} days`
-      + (invitation.email ? `, and only for ${invitation.email}.` : ', once, for whoever opens it.')
-      + ' It stays valid until it is used, so you can send it again if it goes astray.'),
-  );
+  return children(gmail, share, copyLink);
 }
 
 async function copy(text, message) {
@@ -268,7 +349,11 @@ function inviteRow(invitation, onChanged) {
       el('div', {}, invitation.name || invitation.email || 'Anyone with the link'),
       el('div', { class: 'muted small' },
         [invitation.email && invitation.name ? invitation.email : null,
-          `sent ${formatDate(invitation.createdAt)}`].filter(Boolean).join(' · ')),
+          // "created" and "emailed" are different claims, and the difference
+          // is the whole reason the sentAt stamp exists.
+          invitation.sentAt
+            ? `emailed ${formatDate(invitation.sentAt)}`
+            : `created ${formatDate(invitation.createdAt)}`].filter(Boolean).join(' · ')),
     ),
     el('span', { class: `pill pill--${status.state}` }, status.label),
     status.state === 'pending' && cancel,

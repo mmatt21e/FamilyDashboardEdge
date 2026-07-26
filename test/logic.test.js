@@ -32,7 +32,7 @@ import {
 } from '../src/photo-edits.js';
 import {
   generateCode, looksLikeEmail, buildInvitation, checkInvitation, describeInvitation,
-  toInviteLink, parseInviteCode, inviteMessage,
+  toInviteLink, parseInviteCode, inviteMessage, inviteSubject, buildRawEmail,
 } from '../src/invites.js';
 import { detectPlatform, installGuidance, shouldOfferInstall, OS } from '../src/install.js';
 import { walkFolders } from '../src/drive.js';
@@ -1404,6 +1404,49 @@ describe('invitation links', () => {
     const message = inviteMessage({ familyName: 'the Smiths', fromName: 'Matt', link: 'https://x.example/#setup=a&invite=b' });
     assert.ok(message.includes('\nhttps://x.example/#setup=a&invite=b\n'));
     assert.match(message, /Matt/);
+  });
+
+  // The raw payload goes to the Gmail API verbatim; if any of this is wrong
+  // the send "succeeds" and the recipient gets a mangled or missing message,
+  // so the test decodes it back the way a mail server would.
+  test('the raw email round-trips: recipient, subject, and the link in the body', () => {
+    const link = 'https://x.example/#setup=a&invite=b';
+    const raw = buildRawEmail({
+      to: 'mindy@example.com',
+      subject: inviteSubject('the Smiths'),
+      body: inviteMessage({ familyName: 'the Smiths', fromName: 'Matt', link }),
+    });
+
+    // base64url with no padding, exactly as the Gmail API requires.
+    assert.match(raw, /^[A-Za-z0-9_-]+$/);
+
+    const decoded = Buffer.from(raw, 'base64url').toString('utf8');
+    const [headers, ...bodyParts] = decoded.split('\r\n\r\n');
+    assert.match(headers, /^To: mindy@example\.com\r\n/);
+    assert.match(headers, /Subject: Join the Smiths's photo dashboard\r\n/);
+    assert.match(headers, /charset="UTF-8"/);
+    assert.ok(bodyParts.join('\r\n\r\n').includes(link), 'the invite link must survive into the body');
+  });
+
+  test('a subject beyond ASCII is RFC 2047 encoded so it survives mail servers', () => {
+    const raw = buildRawEmail({ to: 'a@b.co', subject: 'the Smiths’ photos — join', body: 'hi' });
+    const decoded = Buffer.from(raw, 'base64url').toString('utf8');
+    const match = /Subject: =\?UTF-8\?B\?([A-Za-z0-9+/=]+)\?=\r\n/.exec(decoded);
+    assert.ok(match, 'a non-ASCII subject must be RFC 2047 wrapped');
+    assert.equal(Buffer.from(match[1], 'base64').toString('utf8'), 'the Smiths’ photos — join');
+  });
+
+  test('a plain ASCII subject stays readable, not needlessly encoded', () => {
+    const decoded = Buffer.from(
+      buildRawEmail({ to: 'a@b.co', subject: 'Join us', body: 'hi' }), 'base64url').toString('utf8');
+    assert.match(decoded, /Subject: Join us\r\n/);
+  });
+
+  test('a body with emoji and accents survives the base64url round trip', () => {
+    const body = 'Grand-mère says hi 👋 café ☕';
+    const decoded = Buffer.from(
+      buildRawEmail({ to: 'a@b.co', subject: 'hello', body }), 'base64url').toString('utf8');
+    assert.ok(decoded.endsWith(body));
   });
 });
 

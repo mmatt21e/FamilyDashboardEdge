@@ -34,9 +34,14 @@ const GIS_SRC = 'https://accounts.google.com/gsi/client';
 const SCOPES = 'https://www.googleapis.com/auth/drive';
 
 let gisLoaded = null;
-let tokenClient = null;
 let accessToken = null;
 let tokenExpiry = 0;
+
+// One client per scope set. Drive is the everyday one; the Gmail send scope
+// is requested ONLY at the moment somebody sends an invitation, so granting
+// the app photos never quietly grants it email as well.
+const tokenClients = new Map();
+const scopedTokens = new Map();
 
 /**
  * Which Google account Drive tokens should come from.
@@ -153,14 +158,16 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
   return requestToken({ clientId, prompt: interactive ? 'consent' : '' });
 }
 
-async function requestToken({ clientId, prompt }) {
+async function requestToken({ clientId, prompt, scope = SCOPES }) {
   await loadGis();
+  let tokenClient = tokenClients.get(scope);
   if (!tokenClient) {
     tokenClient = window.google.accounts.oauth2.initTokenClient({
       client_id: clientId,
-      scope: SCOPES,
+      scope,
       callback: () => {},
     });
+    tokenClients.set(scope, tokenClient);
   }
 
   // THE HANG THIS FIXES.
@@ -194,11 +201,16 @@ async function requestToken({ clientId, prompt }) {
       if (response?.error) {
         return finish(reject, new Error(`${response.error}: ${response.error_description ?? 'Google refused the request.'}`));
       }
-      rememberToken(
-        response.access_token,
-        Date.now() + Number(response.expires_in ?? 3600) * 1000,
-      );
-      finish(resolve, accessToken);
+      const expiry = Date.now() + Number(response.expires_in ?? 3600) * 1000;
+      if (scope === SCOPES) {
+        // Only the Drive token goes into the persistent caches - the mirror in
+        // IndexedDB exists for the streaming worker, which has no business
+        // holding a token that can send mail.
+        rememberToken(response.access_token, expiry);
+      } else {
+        scopedTokens.set(scope, { token: response.access_token, expiry });
+      }
+      finish(resolve, response.access_token);
     };
 
     // Fires for popup_failed_to_open, popup_closed and similar. Without it
@@ -216,6 +228,25 @@ async function requestToken({ clientId, prompt }) {
       finish(reject, error);
     }
   });
+}
+
+/**
+ * A token for a scope other than the everyday Drive one.
+ *
+ * Cached in memory for its hour and nowhere else: the only current caller is
+ * sending an invitation email, which is rare enough that re-consenting after
+ * a page reload is fine and persisting a mail-capable token is not.
+ */
+export async function getScopedToken({ clientId, scope }) {
+  const cached = scopedTokens.get(scope);
+  if (cached && Date.now() < cached.expiry - 60_000) return cached.token;
+
+  try {
+    return await requestToken({ clientId, prompt: 'none', scope });
+  } catch {
+    // First time: Google needs to show the consent for this scope.
+    return requestToken({ clientId, prompt: '', scope });
+  }
 }
 
 export function hasDriveAccess() {

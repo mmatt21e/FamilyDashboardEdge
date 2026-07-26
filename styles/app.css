@@ -621,3 +621,10 @@ a { color: var(--accent); }
 video.viewer__img { background: #000; }
 .viewer__video-note { color: #fff; text-align: center; display: grid; gap: .75rem; justify-items: center; }
 .viewer__video-note .spinner { color: rgba(255, 255, 255, .8); }
+
+/* Drive's own player, embedded when the browser can't decode the format. */
+.viewer__video-note--embed { width: min(100%, 60rem); }
+.viewer__drive-embed {
+  width: 100%; aspect-ratio: 16 / 9; max-height: 65dvh;
+  border: 0; border-radius: .5rem; background: #000;
+}

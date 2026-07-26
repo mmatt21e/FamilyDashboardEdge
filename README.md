@@ -105,15 +105,24 @@ folder ID.
 ### 7. Invite everyone else
 
 Settings → **Invite someone**. Give their name and, ideally, the email address
-of the Google account they will sign in with, then **Create invitation**.
+of the Google account they will sign in with, then **Send the invitation**.
 
-**The app does not send it for you.** It is a static site with no server and no
-mail account, so nothing here can put a message in somebody's inbox. What it
-does is write the message and hand you three ways to send it: **Email** (opens
-your own mail app with everything filled in), **Share** (the phone's share
-sheet, into whichever chat the family uses), or **Copy**. The upside of doing it
-this way is that the invitation arrives from an address they recognise rather
-than a no-reply nobody trusts.
+**The app emails it for them.** There is still no server and no mail account:
+the email goes out through the Gmail API as *you*, the signed-in inviter, so it
+arrives from an address the recipient recognises rather than a no-reply nobody
+trusts. Two one-time things make that work:
+
+- **Enable the Gmail API** for the family's Google Cloud project (the same
+  console the Drive API was enabled in). If it is off, the first send fails
+  with a message that links straight to the right console page.
+- **Approve the send permission** the first time you send an invitation. Google
+  shows a consent screen for "send email on your behalf"; it is asked for only
+  at the moment of sending, never bundled into the everyday Drive permission,
+  and the token it produces is kept in memory only.
+
+If sending fails — or you leave the email blank — the screen falls back to the
+old ways: Gmail's compose window pre-filled, the phone's share sheet, or plain
+copying. A link-only invitation is never emailed at all.
 
 The link does three things when they open it: fills in all the settings, walks
 them through adding the app to their home screen, and lets them sign in with
@@ -295,7 +304,8 @@ src/
   memories.js         "on this day" date logic
   files.js            Drive metadata → pointer records
   catalog.js          face-tag CSVs → who is in each photo
-  invites.js          invitation codes, links and expiry
+  invites.js          invitation codes, links, expiry and the email itself
+  gmail.js            sends the invitation email through the Gmail API
   install.js          which device this is, and how it can install
   catalog-store.js    where those tags live in Firestore
   photo-edits.js      corrections made by hand, which an import never undoes

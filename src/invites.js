@@ -168,6 +168,54 @@ export function parseInviteCode(input) {
   return match ? match[1] : null;
 }
 
+// ---------------------------------------------------------------------------
+// The email itself
+// ---------------------------------------------------------------------------
+
+/** The subject line. Kept plain: this lands in a relative's inbox. */
+export function inviteSubject(familyName = 'our family') {
+  return `Join ${familyName}'s photo dashboard`;
+}
+
+const CRLF = '\r\n';
+
+/** Base64url over UTF-8 bytes, the encoding the Gmail API wants. */
+function base64urlUtf8(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** RFC 2047 for a subject with anything past ASCII in it - a curly quote, say. */
+function encodeHeaderText(text) {
+  if (/^[\x20-\x7e]*$/.test(text)) return text;
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `=?UTF-8?B?${btoa(binary)}?=`;
+}
+
+/**
+ * The raw RFC 822 message the Gmail API sends verbatim.
+ *
+ * Built by hand because it is five headers and a body, and a MIME library
+ * would be the largest dependency in the app. From: is left to Gmail, which
+ * stamps the authenticated sender - the one header nobody should be able to
+ * write for themselves.
+ */
+export function buildRawEmail({ to, subject, body }) {
+  const message = [
+    `To: ${to}`,
+    `Subject: ${encodeHeaderText(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: 8bit',
+  ].join(CRLF) + CRLF + CRLF + body;
+
+  return base64urlUtf8(message);
+}
+
 /**
  * The message that gets sent.
  *

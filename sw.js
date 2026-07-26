@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v15';
+const CACHE_VERSION = 'v16';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -34,6 +34,7 @@ const SHELL = [
   './src/files.js',
   './src/firebase.js',
   './src/folders.js',
+  './src/gmail.js',
   './src/install.js',
   './src/invites.js',
   './src/local-cache.js',
