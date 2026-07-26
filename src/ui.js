@@ -61,11 +61,23 @@ export function escapeHtml(text) {
 // ---------------------------------------------------------------------------
 
 let toastTimer = null;
+let toastDeadline = 0;
 
+/**
+ * A passing notice. "Passing" is the part that needs engineering: dismissal
+ * used to hang on a single setTimeout, and a phone freezes a home-screen app
+ * the moment you switch away or the screen dims. Freeze inside the three
+ * seconds and the timer stops with the toast still up; not every resume path
+ * fires overdue timers, and there was no other way for it to leave - so a
+ * toast could sit at the bottom of the screen indefinitely. Now: the timer,
+ * plus a deadline swept when the app becomes visible or focused again, plus
+ * tap to dismiss - which is what a person tries first anyway.
+ */
 export function toast(message, { error = false, duration = 3200 } = {}) {
   let node = document.getElementById('toast');
   if (!node) {
     node = el('div', { id: 'toast', class: 'toast', role: 'status', 'aria-live': 'polite' });
+    node.addEventListener('pointerdown', hideToast);
     document.body.append(node);
   }
   node.textContent = message;
@@ -73,7 +85,24 @@ export function toast(message, { error = false, duration = 3200 } = {}) {
   node.classList.add('toast--visible');
 
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => node.classList.remove('toast--visible'), duration);
+  toastDeadline = Date.now() + duration;
+  toastTimer = setTimeout(hideToast, duration);
+}
+
+/** Looked up by id at hide time - a closed-over node can be a stale one. */
+function hideToast() {
+  toastDeadline = 0;
+  document.getElementById('toast')?.classList.remove('toast--visible');
+}
+
+// The sweep for frozen timers: coming back to the app checks whether the
+// current toast's time was already up while the page slept.
+if (typeof document !== 'undefined') {
+  const sweep = () => {
+    if (toastDeadline && Date.now() >= toastDeadline) hideToast();
+  };
+  document.addEventListener('visibilitychange', sweep);
+  window.addEventListener('focus', sweep);
 }
 
 export function spinner(label = 'Loading…') {
