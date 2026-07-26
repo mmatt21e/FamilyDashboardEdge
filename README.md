@@ -406,13 +406,16 @@ Point PhotoSync at `Dashboard_Image_Storage/<your name>` on each phone. A person
 folder at the *top* level works exactly as well — the app reads whichever it
 finds — so an existing setup does not need changing.
 
-Two things the app deliberately cannot do, because its Drive scopes are
-`drive.readonly` and `drive.file`:
+The app holds **full Google Drive access**, granted deliberately by the family
+owner: the earlier narrow scopes could read everything but move only the app's
+own uploads, which left every misfiled PhotoSync video permanently stuck. The
+scope is a capability, not a behaviour — the code touches nothing outside the
+shared folder, this repository is the audit trail for that claim, and the grant
+can be withdrawn any time at myaccount.google.com/permissions. Each person
+approves it once, on their next visit to Photos.
 
-- **It cannot move or rename anything it did not create.** Folders you or
-  PhotoSync made are read and left alone. Tidying those is a drag-and-drop job
-  in Drive, by a person.
-- **It cannot repoint PhotoSync.** That is a setting on each phone.
+One thing the app still cannot do: **repoint PhotoSync.** That is a setting on
+each phone.
 
 Nesting is fine at any depth — the scan walks the whole tree with pagination.
 The photo's *owner* is worked out from the whole path, skipping folders the app

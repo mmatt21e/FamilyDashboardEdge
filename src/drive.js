@@ -15,18 +15,21 @@
  *
  * SCOPES
  * ------
- * `drive.readonly` to read what PhotoSync uploaded (files this app did not
- * create, so the narrower drive.file scope cannot see them), plus `drive.file`
- * for the app's own uploads. Asking for full `drive` access would let this app
- * touch every unrelated document in the account, which it has no business
- * doing.
+ * Full `drive` access, granted DELIBERATELY - the family owner asked for it by
+ * name after hearing the trade. The app started on the narrow pair
+ * (`drive.readonly` + `drive.file`), which could read everything but move only
+ * its own uploads; that left every video PhotoSync ever filed with the photos
+ * permanently stuck there, and the owner chose the broader grant over dragging
+ * files by hand forever.
+ *
+ * The scope is a capability, not a behaviour: the code still touches nothing
+ * outside the configured shared folder, and this repository is the audit trail
+ * for that claim. Anyone in the family can withdraw the grant at
+ * myaccount.google.com/permissions at any time.
  */
 
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
-const SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.file',
-].join(' ');
+const SCOPES = 'https://www.googleapis.com/auth/drive';
 
 let gisLoaded = null;
 let tokenClient = null;
@@ -98,7 +101,7 @@ function rememberToken(token, expiry) {
   accessToken = token;
   tokenExpiry = expiry;
   try {
-    sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiry }));
+    sessionStorage.setItem(TOKEN_KEY, JSON.stringify({ token, expiry, scope: SCOPES }));
   } catch { /* private mode; it just re-requests next time */ }
 }
 
@@ -106,7 +109,10 @@ function recallToken() {
   if (accessToken) return;
   try {
     const saved = JSON.parse(sessionStorage.getItem(TOKEN_KEY) ?? 'null');
-    if (saved?.token && saved.expiry > Date.now()) {
+    // A token minted under a different scope set is not this token: after the
+    // scopes widened, a cached narrow token would still read fine and then
+    // fail every move with a 403 for the rest of its hour.
+    if (saved?.token && saved.expiry > Date.now() && saved.scope === SCOPES) {
       accessToken = saved.token;
       tokenExpiry = saved.expiry;
     }
@@ -544,10 +550,10 @@ export async function uploadFile(file, { folderId, clientId, onProgress, path = 
 /**
  * Moves a file between folders.
  *
- * Only works on files THIS APP uploaded: the drive.file scope grants write
- * access to the app's own files and nothing else, so a video PhotoSync put in
- * the wrong place comes back 403 from here. Callers must treat that as the
- * expected answer for most of the library, not as a failure to retry.
+ * Under the full drive scope this works on anything in the shared folder,
+ * whoever uploaded it. A 403 can still happen - a file owned by an account
+ * that has since left the folder, say - so callers should treat one as "skip
+ * and report", never as something to retry into.
  */
 export async function moveFile(fileId, { fromId, toId, clientId } = {}) {
   const params = new URLSearchParams({

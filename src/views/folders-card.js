@@ -90,9 +90,9 @@ export function foldersCard() {
     body,
 
     el('p', { class: 'muted small' },
-      'Folders you or PhotoSync made are read but never moved or renamed — the app '
-      + 'only has permission to touch what it created itself. Tidying those is a '
-      + 'drag-and-drop job in Drive.'),
+      'The app has full access to the family\u2019s Drive — granted deliberately, so it '
+      + 'can keep things tidy wherever they were uploaded from. It still only ever '
+      + 'touches the shared folder.'),
   );
 
   return card;

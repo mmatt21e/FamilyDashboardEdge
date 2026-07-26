@@ -213,15 +213,15 @@ async function doLoad() {
 }
 
 /**
- * Puts videos the app uploaded into the video store.
+ * Puts misfiled videos into the video store.
  *
  * Every scan looks for videos filed under the photo store and moves them to
- * the mirrored spot under the video one. Only the app's own uploads CAN move -
- * drive.file grants write access to nothing else - so a video PhotoSync
- * dropped with the photos comes back 403. Those are remembered for the
- * session (retrying every scan would hammer Drive for guaranteed refusals),
- * counted, and reported in the Videos view as a drag-in-Drive job, because a
- * tidy the app silently cannot finish looks exactly like a bug.
+ * the mirrored spot under the video one - a batch per scan, politely, so a
+ * backlog drains over a few opens rather than hammering Drive in one. With
+ * the full drive scope this covers everyone's uploads, not only the app's
+ * own. The rare file that still refuses is remembered for the session rather
+ * than retried into the same refusal, and counted in the Videos view, because
+ * a tidy the app silently cannot finish looks exactly like a bug.
  */
 const MOVES_PER_SCAN = 25;
 const unmovable = new Set();
@@ -1435,9 +1435,8 @@ async function libraryView(kind) {
 
     const notices = [
       kind === KIND.VIDEO && state.misfiledVideos > 0 && el('p', { class: 'notice' },
-        `${state.misfiledVideos} ${state.misfiledVideos === 1 ? 'video lives' : 'videos live'} in the photo folders. `
-        + 'The app can only move files it uploaded itself — dragging the rest into '
-        + `${MANAGED.VIDEOS} in Drive tidies them for good. They play here either way.`),
+        `${state.misfiledVideos} ${state.misfiledVideos === 1 ? 'video' : 'videos'} in the photo folders could not be moved. `
+        + `Dragging them into ${MANAGED.VIDEOS} in Drive tidies them for good — they play here either way.`),
       state.fileError && el('p', { class: 'notice' },
         `Showing the photos from last time — ${state.fileError.title ?? 'the shared folder could not be refreshed'}. `,
         el('button', { class: 'link-btn', type: 'button', onClick: retryScan }, 'Try again'),

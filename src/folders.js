@@ -25,18 +25,12 @@
  * That is the difference between a folder that stays legible and one that grows
  * a new entry every time somebody signs in.
  *
- * TWO THINGS THE APP CANNOT DO, both worth knowing before relying on this:
- *
- *   It cannot move or rename anything it did not create. The Drive scopes are
- *   `drive.readonly` and `drive.file`, so folders made by hand or by PhotoSync
- *   are readable and untouchable. Tidying existing folders is a drag-and-drop
- *   job in Drive, by a person.
- *
- *   It cannot repoint PhotoSync. That is a setting on each phone.
- *
- * Neither is a problem in practice, because a person folder at the top level
- * works just as well as one inside the image store - see ownerFromPath in
- * files.js. The structure is a tidy default, not a requirement.
+ * ONE THING THE APP STILL CANNOT DO: repoint PhotoSync. That is a setting on
+ * each phone. (It CAN now move and rename what others uploaded - the family
+ * owner granted full Drive access by name, for exactly that; see the scopes
+ * note in drive.js.) A person folder at the top level still works as well as
+ * one inside the image store - see ownerFromPath in files.js. The structure
+ * is a tidy default, not a requirement.
  */
 
 import { ensureFolder, ensureFolderPath, listFolder } from './drive.js';
