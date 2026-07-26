@@ -17,6 +17,7 @@ import * as fb from './firebase.js';
 import * as router from './router.js';
 import { diagnoseStartup, STARTUP_TIMEOUT_MS } from './diagnose.js';
 import { setAccountHint } from './drive.js';
+import { autoUpdate } from './update.js';
 
 import { setupView, signInView } from './views/setup.js';
 import { settingsView } from './views/settings.js';
@@ -181,6 +182,10 @@ async function continueBoot(config) {
     // race.
     void primeCatalog();
     startApp();
+    // Quietly, after the app is usable: if the server has moved on, reload
+    // once into the new build. This is what makes updates land without anyone
+    // hunting for a button - once per served build, so it can never loop.
+    void autoUpdate({ onUpdating: () => toast('Updating to the newest version…') });
   });
 }
 

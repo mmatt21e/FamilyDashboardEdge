@@ -12,6 +12,7 @@ import { inviteCard } from './invite.js';
 import { installCard } from './install-card.js';
 import { foldersCard } from './folders-card.js';
 import { versionLabel, buildDate } from '../version.js';
+import { newerBuild, applyUpdate } from '../update.js';
 
 export async function settingsView() {
   return el('div', { class: 'view' },
@@ -63,32 +64,19 @@ function versionLine() {
 }
 
 /**
- * Asks the service worker to look for a newer release.
+ * "Is the build I am running the build being served?" - asked of the server,
+ * not of the service worker's state machine. The worker skip-waits, so by the
+ * time anyone looked for a waiting worker there usually was none, the old
+ * check said "already up to date", and the page never reloaded off the old
+ * code. See src/update.js for the full story.
  *
- * When one is found it is told to take over immediately and the page reloads -
- * otherwise a waiting worker sits there until every tab is closed, which for an
- * app people leave open on the home screen can be days.
- *
- * @returns {Promise<boolean>} whether an update was found
+ * @returns {Promise<boolean>} whether an update was found and is being applied
  */
 async function checkForUpdate() {
-  try {
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (!registration) return false;
-
-    await registration.update();
-    const waiting = registration.waiting ?? registration.installing;
-    if (!waiting) return false;
-
-    navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
-    waiting.postMessage({ type: 'SKIP_WAITING' });
-    // Installing workers need a moment before they can be activated; the
-    // controllerchange listener above catches it either way.
-    setTimeout(() => location.reload(), 2500);
-    return true;
-  } catch {
-    return false;
-  }
+  const live = await newerBuild();
+  if (!live) return false;
+  await applyUpdate();
+  return true;
 }
 
 function appearanceCard() {

@@ -46,6 +46,7 @@ const SHELL = [
   './src/store.js',
   './src/thumbs.js',
   './src/ui.js',
+  './src/update.js',
   './src/version.js',
   './src/views/feed.js',
   './src/views/import-tags.js',
@@ -90,6 +91,10 @@ self.addEventListener('message', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
+
+  // "What is live right now?" probes must reach the server. Answering them
+  // from a cache would make the update check agree with itself forever.
+  if (request.cache === 'no-store') return;
 
   const url = new URL(request.url);
 
