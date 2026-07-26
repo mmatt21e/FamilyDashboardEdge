@@ -334,11 +334,12 @@ export async function walkFolders(folderId, listPage, {
   onProgress = null,
 } = {}) {
   const items = [];
-  const queue = [{ id: folderId, path: [] }];
+  const queue = [{ id: folderId, path: [], isRoot: true }];
   const seen = new Set([folderId]);
   let folders = 0;
   let active = 0;
   let truncated = false;
+  let rootError = null;
 
   // Several folders are read at once. This is where the scan's time actually
   // goes: an archive is hundreds of folders, each one a round trip, and doing
@@ -394,13 +395,27 @@ export async function walkFolders(folderId, listPage, {
           // than waiting for this folder's remaining pages.
           pump();
         } while (pageToken && !truncated);
-      } catch {
-        // One unreadable folder must not blank the whole photo grid.
+      } catch (error) {
+        // One unreadable SUBFOLDER must not blank the whole photo grid. The
+        // ROOT is different: if the shared folder itself cannot be read -
+        // expired token, revoked access, wrong id - then nothing could be
+        // read, and reporting it as an empty library is a lie with teeth.
+        // The caller believes it, shows "No photos yet", and overwrites the
+        // device's snapshot with the emptiness, wiping a working screen over
+        // an auth blip. An unreadable root is a failure and is thrown as one.
+        if (folder.isRoot) rootError = error;
       }
     };
 
     pump();
   });
+
+  if (rootError) {
+    // Some items may still have arrived if the root failed mid-pagination;
+    // keep them and mark the scan short rather than discarding real work.
+    if (!items.length) throw rootError;
+    truncated = true;
+  }
 
   // Anything still queued when we stopped is a folder never opened.
   if (queue.length) truncated = true;

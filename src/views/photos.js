@@ -10,7 +10,8 @@ import { el, spinner, emptyState, toast, formatDate, children } from '../ui.js';
 import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
-import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from '../drive.js';
+import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess, getAccessToken } from '../drive.js';
+import { cacheGet, cacheSet } from '../local-cache.js';
 import { toPointerRecord, sortByTakenDesc, uploadPathFor, kindForMime, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
 import { provisionStructure } from '../folders.js';
@@ -99,16 +100,51 @@ function withEdits(records) {
   return merged;
 }
 
+/** How many records the on-device snapshot keeps. Plenty past the scan cap. */
+const SNAPSHOT_MAX = 25_000;
+
+function snapshotKey() {
+  return `files:${state.config?.driveFolderId ?? ''}`;
+}
+
 async function doLoad() {
-  const [catalog] = await Promise.all([ensureCatalog(), loadEdits()]);
+  // A reconcile is coming, and saying so from the very first moment matters:
+  // the snapshot painted below carries thumbnail links that are hours stale,
+  // and the fallback ladder only waits for fresh links while loadingFiles is
+  // true. Without this, every stale tile would head for the full-file path in
+  // the gap before the scan starts.
+  update({ loadingFiles: true, fileError: null });
+
+  // Everything independent starts NOW, together. The old sequence awaited the
+  // catalog before reading the index and only then went near Drive, which put
+  // three round trips nose to tail before the first pixel. The token prewarm
+  // also pulls the Google Identity script and the silent token grant forward
+  // so the scan starts the moment it is wanted, not two seconds after.
+  const catalogP = ensureCatalog();
+  const editsP = loadEdits();
+  void getAccessToken({ clientId: state.config.googleClientId }).catch(() => {});
+
+  // --- stage 0: last time's listing, from disk -----------------------------
+  // The single change that makes opening feel instant: the merged listing from
+  // the previous session paints before ANY network happens. Everything after
+  // this stage is reconciliation the person can already scroll under.
+  if (!state.files.length) {
+    const snapshot = await cacheGet(snapshotKey());
+    if (snapshot?.records?.length) {
+      baseRecords = snapshot.records;
+      update({ files: withEdits(baseRecords), driveReady: true });
+      window.dispatchEvent(new CustomEvent('fd:files-changed'));
+    }
+  }
+
+  const catalog = await catalogP;
+  await editsP;
   const tag = (records) => applyCatalog(records, catalog?.lookup);
 
-  // --- stage 1: the cached index -------------------------------------------
-  // Read in full, not the first page - a capped read shows a fraction of the
-  // library as though that were all there is. But painted from the FIRST page:
-  // the pages are newest-first, so the thousand photos a person actually
-  // scrolls first are on screen while pages two through ten are still on the
-  // wire, instead of the whole read gating the first pixel.
+  // --- stage 1: the index in Firestore -------------------------------------
+  // Only when the device had no snapshot - a first run, or a new phone. Read
+  // in full but painted from the FIRST page: pages are newest-first, so the
+  // photos a person scrolls first are on screen while the rest is on the wire.
   if (!state.files.length) {
     try {
       const paint = (rows) => {
@@ -127,7 +163,6 @@ async function doLoad() {
   }
 
   // --- stage 2: reconcile against Drive ------------------------------------
-  update({ loadingFiles: true, fileError: null });
   try {
     const scan = await listSharedMedia(state.config.driveFolderId, {
       clientId: state.config.googleClientId,
@@ -148,6 +183,13 @@ async function doLoad() {
       // Surfaced rather than swallowed: a library that stopped at the limit
       // must not look like a library that ended there.
       scanTruncated: scan.truncated,
+    });
+
+    // The merged view goes to disk so the NEXT open paints from it before any
+    // network. Fire-and-forget: a failed save just means the old snapshot.
+    void cacheSet(snapshotKey(), {
+      records: state.files.slice(0, SNAPSHOT_MAX),
+      savedAt: new Date().toISOString(),
     });
 
     void persistNewPointers(records);
@@ -1096,13 +1138,19 @@ export async function photosView() {
     gridSlot.replaceChildren(photoGrid(shown, openPhoto));
   }
 
+  const retryScan = async () => {
+    forgetDriveAccess();
+    await loadFiles({ force: true });
+    draw();
+  };
+
   const draw = () => {
-    if (state.fileError) {
-      return container.replaceChildren(driveProblem(state.fileError, async () => {
-        forgetDriveAccess();
-        await loadFiles({ force: true });
-        draw();
-      }));
+    // A scan failure only owns the whole screen when there is nothing else to
+    // show. With last session's photos already painted, replacing them with a
+    // full-page error because a background refresh hiccuped would throw away
+    // a working screen - the photos stay, and the problem becomes a line.
+    if (state.fileError && !state.files.length) {
+      return container.replaceChildren(driveProblem(state.fileError, retryScan));
     }
     // Checked after the error, or a failure before driveReady would sit behind
     // a spinner forever. `driveReady` is part of the condition so a first-ever
@@ -1120,6 +1168,10 @@ export async function photosView() {
 
     container.replaceChildren(...children(
       el('header', { class: 'view__header' }, el('h1', {}, 'Photos'), countSlot),
+      state.fileError && el('p', { class: 'notice' },
+        `Showing the photos from last time — ${state.fileError.title ?? 'the shared folder could not be refreshed'}. `,
+        el('button', { class: 'link-btn', type: 'button', onClick: retryScan }, 'Try again'),
+      ),
       state.scanTruncated && el('p', { class: 'notice' },
         'This is as much of the shared folder as one scan collects. Everything here works '
         + 'normally; there are simply more photos in the folder than are being read. '

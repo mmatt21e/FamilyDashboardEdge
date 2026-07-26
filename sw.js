@@ -36,6 +36,7 @@ const SHELL = [
   './src/folders.js',
   './src/install.js',
   './src/invites.js',
+  './src/local-cache.js',
   './src/memories.js',
   './src/modules.js',
   './src/notifications.js',

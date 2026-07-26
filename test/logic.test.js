@@ -2024,3 +2024,36 @@ describe('walking folders in parallel', () => {
     assert.equal(scan.items.length, 1, 'the shared folder must still be read once');
   });
 });
+
+describe('a scan that could not read anything', () => {
+  // The lie with teeth: an unreadable root reported as an empty library.
+  // The caller believes it, shows "No photos yet", and overwrites the
+  // device's snapshot with the emptiness - an auth blip wipes the screen.
+  test('an unreadable root folder throws instead of reporting an empty library', async () => {
+    const listPage = async () => { throw new Error('401'); };
+    await assert.rejects(() => walkFolders('root', listPage), /401/);
+  });
+
+  test('an unreadable subfolder is still merely skipped', async () => {
+    const listPage = async (id) => {
+      if (id === 'bad') throw new Error('403');
+      if (id === 'root') return { files: [folder('bad', 'Bad'), photo('a', 'a.jpg')], nextPageToken: null };
+      return { files: [], nextPageToken: null };
+    };
+    const scan = await walkFolders('root', listPage);
+    assert.deepEqual(scan.items.map((i) => i.file.id), ['a']);
+  });
+
+  test('a root that fails mid-pagination keeps what arrived, marked short', async () => {
+    let call = 0;
+    const listPage = async (id) => {
+      if (id !== 'root') return { files: [], nextPageToken: null };
+      call += 1;
+      if (call === 1) return { files: [photo('a', 'a.jpg')], nextPageToken: 'more' };
+      throw new Error('500');
+    };
+    const scan = await walkFolders('root', listPage);
+    assert.deepEqual(scan.items.map((i) => i.file.id), ['a']);
+    assert.equal(scan.truncated, true, 'a partial read must not pass as complete');
+  });
+});
