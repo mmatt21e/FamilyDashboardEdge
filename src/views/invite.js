@@ -179,11 +179,27 @@ function sharePanel(invitation, link) {
   // only way a site with no server can reach an inbox, and it has the pleasant
   // side effect that the invitation comes from a real address the recipient
   // recognises rather than a no-reply nobody trusts.
+  //
+  // Its failure mode is silent and common: a computer with no default mail app
+  // does NOTHING when a mailto link is clicked - no error, no window, nothing -
+  // and "I pressed Email and no invitation arrived" is exactly what that looks
+  // like from the outside. Hence the Gmail button beside it: a plain web link
+  // to Gmail's compose screen with everything filled in, which works in any
+  // browser signed in to Google - and this whole app runs on Google sign-in,
+  // so that is every member of this family by construction.
   const email = invitation.email && el('a', {
     class: 'btn btn--primary',
     href: `mailto:${encodeURIComponent(invitation.email)}`
       + `?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(message)}`,
   }, `Email ${invitation.email}`);
+
+  const gmail = invitation.email && el('a', {
+    class: 'btn', target: '_blank', rel: 'noopener',
+    href: 'https://mail.google.com/mail/?view=cm&fs=1'
+      + `&to=${encodeURIComponent(invitation.email)}`
+      + `&su=${encodeURIComponent(subject)}`
+      + `&body=${encodeURIComponent(message)}`,
+  }, 'Open in Gmail');
 
   const share = el('button', { class: invitation.email ? 'btn' : 'btn btn--primary' },
     navigator.share ? 'Share…' : 'Copy the message');
@@ -209,7 +225,11 @@ function sharePanel(invitation, link) {
       'The invitation is saved. Nothing has been sent yet — pick how to send it:'),
 
     el('textarea', { class: 'input input--code', rows: 5, readonly: true }, message),
-    el('div', { class: 'row' }, ...children(email, share, copyLink)),
+    el('div', { class: 'row' }, ...children(email, gmail, share, copyLink)),
+
+    invitation.email && el('p', { class: 'muted small' },
+      'If the Email button does nothing, this computer has no mail app set up — '
+      + 'use Open in Gmail instead, it works in any browser you are signed in to Google on.'),
 
     el('p', { class: 'muted small' },
       `Works for ${DEFAULT_EXPIRY_DAYS} days`
