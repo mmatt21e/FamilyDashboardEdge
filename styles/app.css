@@ -553,3 +553,66 @@ a { color: var(--accent); }
 /* A tile whose cached thumbnail expired, waiting for a fresh link from the
    scan. Hidden rather than showing the browser's broken-image glyph. */
 .tile__img--pending { opacity: 0; }
+
+/* --- The year wall ---------------------------------------------------------
+   What Photos opens onto: one card per year wearing a photo from that year,
+   sectioned by decade so two dozen years read like chapters rather than a
+   wall of numbers. The newest year gets the full width - it is where the
+   family's life currently is. */
+
+.year-wall { display: grid; gap: 1rem; }
+
+.year-all {
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .85rem 1rem; font: inherit; font-weight: 700; cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.year-decade__label {
+  color: var(--muted); text-transform: uppercase; letter-spacing: .06em;
+  font-size: .78rem; margin: .25rem 0 .5rem;
+}
+.year-decade__grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: .6rem;
+}
+
+.year-card {
+  position: relative; overflow: hidden; cursor: pointer;
+  border: 0; padding: 0; border-radius: var(--radius);
+  background: var(--surface-2); aspect-ratio: 3 / 2;
+  text-align: left; box-shadow: var(--shadow);
+}
+.year-card--hero { aspect-ratio: 21 / 9; }
+.year-card:active { transform: scale(.985); }
+
+.year-card__img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover;
+}
+.year-card__img--pending { opacity: 0; }
+
+/* Legibility over any photograph: the text sits on its own gradient, not on
+   luck about how dark the picture happens to be. */
+.year-card__shade {
+  position: absolute; inset: 0;
+  background: linear-gradient(transparent 35%, rgba(0, 0, 0, .68));
+}
+
+.year-card__text {
+  position: absolute; left: .75rem; right: .75rem; bottom: .6rem;
+  display: flex; flex-direction: column; color: #fff;
+}
+.year-card__year {
+  font-size: 1.5rem; font-weight: 800; letter-spacing: .01em; line-height: 1.1;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .5);
+}
+.year-card--hero .year-card__year { font-size: 2.2rem; }
+.year-card__count { font-size: .8rem; opacity: .85; font-variant-numeric: tabular-nums; }
+
+/* The card for photos no year can claim. No cover - that is rather the point. */
+.year-card--undated { aspect-ratio: auto; min-height: 4.5rem; }
+.year-card--undated .year-card__text { position: static; padding: .85rem 1rem; color: var(--text); }
+.year-card--undated .year-card__count { color: var(--muted); }

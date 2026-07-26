@@ -32,6 +32,7 @@ export function emptyFilters() {
     kind: null,
     folder: null,
     untaggedOnly: false,
+    undatedOnly: false,
     text: '',
   };
 }
@@ -45,6 +46,7 @@ export function hasActiveFilters(filters = {}) {
     filters.kind ||
     filters.folder ||
     filters.untaggedOnly ||
+    filters.undatedOnly ||
     filters.text?.trim(),
   );
 }
@@ -187,6 +189,9 @@ export function filterPhotos(records = [], filters = emptyFilters()) {
     if (filters.folder && record.folder !== filters.folder) return false;
 
     if (filters.untaggedOnly && record.people?.length) return false;
+    // The photos a year card cannot reach: no date at all. The year wall
+    // gives them their own card, and this is the filter behind it.
+    if (filters.undatedOnly && record.takenAt) return false;
 
     if (wanted.length) {
       const present = new Set((record.people ?? []).map((p) => p.toLowerCase()));
@@ -240,6 +245,7 @@ export function describeFilters(filters = {}, facets = null) {
   }
   if (filters.folder) chips.push({ field: 'folder', value: filters.folder, label: filters.folder });
   if (filters.untaggedOnly) chips.push({ field: 'untaggedOnly', value: true, label: 'Not tagged yet' });
+  if (filters.undatedOnly) chips.push({ field: 'undatedOnly', value: true, label: 'No date' });
   if (filters.text?.trim()) chips.push({ field: 'text', value: filters.text, label: `“${filters.text.trim()}”` });
 
   return chips;
@@ -255,9 +261,48 @@ export function clearFilter(filters, field, value) {
       break;
     case 'text': next.text = ''; break;
     case 'untaggedOnly': next.untaggedOnly = false; break;
+    case 'undatedOnly': next.undatedOnly = false; break;
     default: next[field] = null;
   }
   return next;
+}
+
+/**
+ * The year wall: what Photos opens onto.
+ *
+ * Years grouped by decade, newest first. The grouping is the "creative but
+ * easy to understand" part - two dozen year cards in a flat list is a wall of
+ * numbers, but the same cards under "2020s / 2010s / 2000s" headings read the
+ * way a person remembers their own life. Undated photos are counted separately
+ * because no year card could ever reach them; they get a card of their own.
+ */
+export function yearWall(records = []) {
+  const byYear = new Map();
+  let undated = 0;
+
+  for (const record of records) {
+    const { year } = dateParts(record);
+    if (year) byYear.set(year, (byYear.get(year) ?? 0) + 1);
+    else undated += 1;
+  }
+
+  const years = [...byYear.entries()]
+    .map(([year, count]) => ({ year, count }))
+    .sort((a, b) => b.year - a.year);
+
+  const decades = [];
+  for (const entry of years) {
+    const label = `${Math.floor(entry.year / 10) * 10}s`;
+    let decade = decades[decades.length - 1];
+    if (!decade || decade.label !== label) {
+      decade = { label, years: [], count: 0 };
+      decades.push(decade);
+    }
+    decade.years.push(entry);
+    decade.count += entry.count;
+  }
+
+  return { total: records.length, undated, years, decades };
 }
 
 /** "3 of 2,907 photos" - the line under the heading. */

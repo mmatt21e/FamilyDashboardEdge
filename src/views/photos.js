@@ -24,7 +24,7 @@ import {
 import { openTagSheet } from './photo-editor.js';
 import {
   emptyFilters, filterPhotos, buildFacets, describeFilters,
-  clearFilter, describeCount, toggleValue, PEOPLE_MODE,
+  clearFilter, describeCount, toggleValue, dateParts, yearWall, PEOPLE_MODE,
 } from '../photo-filter.js';
 
 /**
@@ -446,9 +446,9 @@ const nearViewport = typeof IntersectionObserver !== 'undefined'
     }, { rootMargin: '600px' })
   : null;
 
-function thumbnail(record) {
+function thumbnail(record, { className = 'tile__img' } = {}) {
   const img = el('img', {
-    class: 'tile__img', loading: 'lazy', decoding: 'async',
+    class: className, loading: 'lazy', decoding: 'async',
     alt: record.name ?? 'Photo',
   });
   img.addEventListener('load', () => img.classList.remove('tile__img--pending'));
@@ -913,6 +913,105 @@ async function tagUploaded(uploaded, values) {
  */
 let filters = emptyFilters();
 
+/**
+ * Photos opens onto the year wall, not the grid.
+ *
+ * Partly navigation, mostly performance: the wall renders two dozen cards
+ * where the grid renders two hundred tiles, so the screen a person lands on
+ * is always light, and a year's grid is a few hundred photos instead of the
+ * whole archive. Like the filters, the mode survives a trip to another tab -
+ * coming back mid-browse should not reset to the start.
+ */
+let viewMode = 'years';
+
+/**
+ * The photo a year card wears.
+ *
+ * The year's photos, newest first (the list is already sorted), preferring
+ * one whose thumbnail this session already holds in memory - a card that
+ * paints instantly beats a marginally newer one that needs the network.
+ */
+function coverFor(year, records) {
+  let fallback = null;
+  for (const record of records) {
+    const recordYear = dateParts(record).year;
+    if (recordYear !== year) {
+      // Sorted newest-first, so once past the year there is no more of it.
+      if (fallback && recordYear !== null && recordYear < year) break;
+      continue;
+    }
+    fallback = fallback ?? record;
+    if (knownThumb(record.driveId)) return record;
+  }
+  return fallback;
+}
+
+/**
+ * The wall itself: a hero card for the newest year, then the rest in decade
+ * sections, then All photos and - when any exist - the photos no year can
+ * claim. Every card says how many photos stand behind it, so the wall doubles
+ * as a map of where the library's weight is.
+ */
+function yearWallView(records, { onYear, onAll, onUndated }) {
+  const wall = yearWall(records);
+  const [hero, ...restYears] = wall.years;
+  const rest = new Set(restYears.map((y) => y.year));
+
+  const card = (entry, { hero: isHero = false } = {}) => {
+    const cover = coverFor(entry.year, records);
+    const node = el('button', {
+      class: `year-card${isHero ? ' year-card--hero' : ''}`, type: 'button',
+      'aria-label': `${entry.year}, ${entry.count} photos`,
+    },
+      cover && thumbnail(cover, { className: 'year-card__img' }),
+      el('span', { class: 'year-card__shade' }),
+      el('span', { class: 'year-card__text' },
+        el('span', { class: 'year-card__year' }, String(entry.year)),
+        el('span', { class: 'year-card__count' },
+          `${entry.count.toLocaleString()} ${entry.count === 1 ? 'photo' : 'photos'}`),
+      ),
+    );
+    node.addEventListener('click', () => onYear(entry.year));
+    return node;
+  };
+
+  const allButton = el('button', { class: 'year-all', type: 'button' },
+    el('span', {}, 'All photos'),
+    el('span', { class: 'muted small' }, wall.total.toLocaleString()),
+  );
+  allButton.addEventListener('click', onAll);
+
+  const undatedCard = wall.undated > 0 && (() => {
+    const node = el('button', { class: 'year-card year-card--undated', type: 'button' },
+      el('span', { class: 'year-card__text' },
+        el('span', { class: 'year-card__year' }, 'No date'),
+        el('span', { class: 'year-card__count' },
+          `${wall.undated.toLocaleString()} ${wall.undated === 1 ? 'photo' : 'photos'}`),
+      ),
+    );
+    node.addEventListener('click', onUndated);
+    return node;
+  })();
+
+  return el('div', { class: 'year-wall' },
+    ...children(
+      allButton,
+      hero && card(hero, { hero: true }),
+      wall.decades.map((decade) => {
+        const cards = decade.years.filter((y) => rest.has(y.year)).map((y) => card(y));
+        if (!cards.length) return null;
+        return el('section', { class: 'year-decade' },
+          el('h2', { class: 'year-decade__label' },
+            decade.label,
+            el('span', { class: 'muted small' }, ` · ${decade.count.toLocaleString()}`)),
+          el('div', { class: 'year-decade__grid' }, cards),
+        );
+      }),
+      undatedCard,
+    ),
+  );
+}
+
 /** A dropdown of one choice, as a plain select. */
 function selectFilter({ label, anyLabel, options, value, format = (o) => o.label, onChange }) {
   const select = el('select', { class: 'filter-select', 'aria-label': label },
@@ -1215,8 +1314,7 @@ export async function photosView() {
       ));
     }
 
-    container.replaceChildren(...children(
-      el('header', { class: 'view__header' }, el('h1', {}, 'Photos'), countSlot),
+    const notices = [
       state.fileError && el('p', { class: 'notice' },
         `Showing the photos from last time — ${state.fileError.title ?? 'the shared folder could not be refreshed'}. `,
         el('button', { class: 'link-btn', type: 'button', onClick: retryScan }, 'Try again'),
@@ -1225,6 +1323,53 @@ export async function photosView() {
         'This is as much of the shared folder as one scan collects. Everything here works '
         + 'normally; there are simply more photos in the folder than are being read. '
         + 'Moving the older ones into their own folder keeps the rest quick.'),
+    ];
+
+    // The wall only earns its place when there are years to choose between.
+    // A library from a single year - or none - goes straight to the grid.
+    const all = media();
+    const wallWorthwhile = yearWall(all).years.length >= 2;
+
+    if (viewMode === 'years' && wallWorthwhile) {
+      container.replaceChildren(...children(
+        el('header', { class: 'view__header' },
+          el('h1', {}, 'Photos'),
+          el('span', { class: 'muted small' }, `${all.length.toLocaleString()} in the library`),
+        ),
+        ...notices,
+        yearWallView(all, {
+          onYear: (year) => {
+            filters = { ...emptyFilters(), year };
+            viewMode = 'grid';
+            draw();
+          },
+          onAll: () => {
+            filters = emptyFilters();
+            viewMode = 'grid';
+            draw();
+          },
+          onUndated: () => {
+            filters = { ...emptyFilters(), undatedOnly: true };
+            viewMode = 'grid';
+            draw();
+          },
+        }),
+      ));
+      return;
+    }
+
+    const backToYears = wallWorthwhile && el('button', {
+      class: 'back', type: 'button',
+      onClick: () => { viewMode = 'years'; draw(); },
+    }, el('span', { class: 'back__chevron', 'aria-hidden': 'true' }, '‹'), 'Years');
+
+    container.replaceChildren(...children(
+      el('header', { class: 'view__header' },
+        backToYears,
+        el('h1', {}, filters.year ? String(filters.year) : 'Photos'),
+        countSlot,
+      ),
+      ...notices,
       uploadButton(),
       barSlot,
       chipSlot,

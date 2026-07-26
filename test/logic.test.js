@@ -24,7 +24,7 @@ import {
 } from '../src/catalog.js';
 import {
   emptyFilters, hasActiveFilters, filterPhotos, buildFacets, describeFilters,
-  clearFilter, describeCount, PEOPLE_MODE,
+  clearFilter, describeCount, yearWall, PEOPLE_MODE,
 } from '../src/photo-filter.js';
 import {
   applyEdits, buildEdit, isEmptyEdit, editedFields, normalisePersonName,
@@ -2055,5 +2055,51 @@ describe('a scan that could not read anything', () => {
     const scan = await walkFolders('root', listPage);
     assert.deepEqual(scan.items.map((i) => i.file.id), ['a']);
     assert.equal(scan.truncated, true, 'a partial read must not pass as complete');
+  });
+});
+
+describe('the year wall', () => {
+  const photo = (iso) => ({ driveId: iso ?? 'x', kind: 'photo', takenAt: iso, people: [] });
+  const records = [
+    photo('2025-06-01T12:00:00.000Z'), photo('2025-01-01T12:00:00.000Z'),
+    photo('2019-06-01T12:00:00.000Z'),
+    photo('2010-06-01T12:00:00.000Z'), photo('2010-07-01T12:00:00.000Z'), photo('2010-08-01T12:00:00.000Z'),
+    photo('2002-06-01T12:00:00.000Z'),
+    photo(null), photo(null),
+  ];
+
+  test('years come newest first, with their counts', () => {
+    const wall = yearWall(records);
+    assert.deepEqual(wall.years.map((y) => [y.year, y.count]),
+      [[2025, 2], [2019, 1], [2010, 3], [2002, 1]]);
+    assert.equal(wall.total, 9);
+  });
+
+  // Two dozen years in a flat list is a wall of numbers; under decade
+  // headings the same cards read the way a person remembers their own life.
+  test('years group into decades, newest decade first', () => {
+    const wall = yearWall(records);
+    assert.deepEqual(wall.decades.map((d) => d.label), ['2020s', '2010s', '2000s']);
+    assert.deepEqual(wall.decades.map((d) => d.count), [2, 4, 1]);
+    assert.deepEqual(wall.decades[1].years.map((y) => y.year), [2019, 2010]);
+  });
+
+  // No year card could ever reach these; without their own count they would
+  // silently vanish from a year-first Photos screen.
+  test('undated photos are counted where a card can be made for them', () => {
+    assert.equal(yearWall(records).undated, 2);
+    assert.equal(yearWall([photo('2020-01-01T12:00:00.000Z')]).undated, 0);
+  });
+
+  test('an empty library is an empty wall, not a crash', () => {
+    const wall = yearWall([]);
+    assert.deepEqual(wall.years, []);
+    assert.equal(wall.total, 0);
+  });
+
+  test('the undated filter reaches exactly the photos no year can', () => {
+    const found = filterPhotos(records, { ...emptyFilters(), undatedOnly: true });
+    assert.equal(found.length, 2);
+    assert.ok(found.every((r) => !r.takenAt));
   });
 });
