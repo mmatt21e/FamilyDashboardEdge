@@ -12,6 +12,7 @@ import { state, update, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
 import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess, getAccessToken } from '../drive.js';
 import { cacheGet, cacheSet } from '../local-cache.js';
+import { knownThumb, thumbFromDisk, fetchAndCacheThumb } from '../thumbs.js';
 import { toPointerRecord, sortByTakenDesc, uploadPathFor, kindForMime, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
 import { provisionStructure } from '../folders.js';
@@ -429,6 +430,22 @@ function driveProblem(diagnosis, onRetry) {
  *   3. only then fetch the file itself - capped in size, a few at a time, and
  *      cached so it is never fetched twice
  */
+/**
+ * Loading is deferred until a tile nears the viewport. The browser's own
+ * loading=lazy only defers what goes through img.src; the cache lookups below
+ * are code, so without this observer building a page of two hundred tiles
+ * would start two hundred loads for photos nobody has scrolled to.
+ */
+const nearViewport = typeof IntersectionObserver !== 'undefined'
+  ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        nearViewport.unobserve(entry.target);
+        entry.target.__loadThumb?.();
+      }
+    }, { rootMargin: '600px' })
+  : null;
+
 function thumbnail(record) {
   const img = el('img', {
     class: 'tile__img', loading: 'lazy', decoding: 'async',
@@ -436,11 +453,43 @@ function thumbnail(record) {
   });
   img.addEventListener('load', () => img.classList.remove('tile__img--pending'));
 
-  if (record.thumbnailUrl) {
-    img.src = record.thumbnailUrl;
-    img.addEventListener('error', () => { void thumbnailFallback(img, record); }, { once: true });
+  // Already in hand from this session: paint synchronously, zero waiting.
+  const known = knownThumb(record.driveId);
+  if (known) {
+    img.src = known;
+    return img;
+  }
+
+  const load = async () => {
+    // The device's copy from an earlier session - the first-open fast path.
+    // No network, no dependence on the scan, works entirely offline.
+    const disk = await thumbFromDisk(record.driveId);
+    if (disk) {
+      img.src = disk;
+      return;
+    }
+
+    if (record.thumbnailUrl) {
+      // Fetch rather than <img>, so the bytes can be kept for next time.
+      const fetched = await fetchAndCacheThumb(record.driveId, record.thumbnailUrl);
+      if (fetched) {
+        img.src = fetched;
+        return;
+      }
+      // No CORS or a dead link: a plain <img> may still manage it, and the
+      // ladder catches the genuinely dead case.
+      img.addEventListener('error', () => { void thumbnailFallback(img, record); }, { once: true });
+      img.src = record.thumbnailUrl;
+    } else {
+      void thumbnailFallback(img, record);
+    }
+  };
+
+  if (nearViewport) {
+    img.__loadThumb = () => { void load(); };
+    nearViewport.observe(img);
   } else {
-    void thumbnailFallback(img, record);
+    void load();
   }
   return img;
 }

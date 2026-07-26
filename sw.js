@@ -44,6 +44,7 @@ const SHELL = [
   './src/photo-filter.js',
   './src/router.js',
   './src/store.js',
+  './src/thumbs.js',
   './src/ui.js',
   './src/version.js',
   './src/views/feed.js',
