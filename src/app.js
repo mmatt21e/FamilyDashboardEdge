@@ -16,6 +16,7 @@ import { isEnabled, navModules, getModule } from './modules.js';
 import * as fb from './firebase.js';
 import * as router from './router.js';
 import { diagnoseStartup, STARTUP_TIMEOUT_MS } from './diagnose.js';
+import { setAccountHint } from './drive.js';
 
 import { setupView, signInView } from './views/setup.js';
 import { settingsView } from './views/settings.js';
@@ -152,6 +153,10 @@ async function continueBoot(config) {
     }
 
     update({ user });
+    // Drive tokens must come from the account that just signed in. On a phone
+    // with several Google accounts, silent renewal fails without this and the
+    // family gets asked to pick an account over and over.
+    setAccountHint(user.email);
     try {
       const member = await fb.upsertMember(user);
       update({ member });

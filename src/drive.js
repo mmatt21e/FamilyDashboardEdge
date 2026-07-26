@@ -33,6 +33,23 @@ let tokenClient = null;
 let accessToken = null;
 let tokenExpiry = 0;
 
+/**
+ * Which Google account Drive tokens should come from.
+ *
+ * A family phone routinely holds several Google sessions - one real one had
+ * four. A silent token request with no hint fails on such a phone every time,
+ * because Google cannot guess which account is meant and 'none' forbids it
+ * from asking; the app then fell back to the interactive chooser, which is
+ * the "it asks me every time I open Photos" experience. Telling Google which
+ * account - the one already signed in to the app - lets the silent path
+ * actually be silent.
+ */
+let accountHint = null;
+
+export function setAccountHint(email) {
+  accountHint = email || null;
+}
+
 const GIS_LOAD_TIMEOUT_MS = 15_000;
 const TOKEN_TIMEOUT_MS = 20_000;
 
@@ -178,7 +195,10 @@ async function requestToken({ clientId, prompt }) {
     };
 
     try {
-      tokenClient.requestAccessToken({ prompt });
+      tokenClient.requestAccessToken({
+        prompt,
+        ...(accountHint ? { hint: accountHint } : {}),
+      });
     } catch (error) {
       finish(reject, error);
     }

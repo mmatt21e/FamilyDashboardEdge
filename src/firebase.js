@@ -47,22 +47,45 @@ export function firebaseReady() {
 // ---------------------------------------------------------------------------
 
 /**
- * Signs in with Google.
+ * Signs in with Google. Popup first, always - including on a home-screen app.
  *
- * Popups are blocked or silently broken in an iOS home-screen PWA, so the
- * redirect flow is used whenever the app is running standalone. On a normal
- * browser tab the popup is nicer, because it does not lose the page.
+ * This used to choose the REDIRECT flow whenever the app ran standalone, on
+ * the old wisdom that popups misbehave there. That produced an unescapable
+ * loop on phones: the redirect walks off to accounts.google.com, sign-in
+ * succeeds, and the result is handed back through a storage handshake between
+ * the firebaseapp.com auth domain and this site's origin - which is exactly
+ * the cross-site storage modern phone browsers now partition. The result
+ * evaporates on the return leg, the app asks who is signed in, hears nobody,
+ * and shows the sign-in screen again. From the outside: "I sign in and
+ * nothing happens", forever.
+ *
+ * The popup flow does not have this problem - the popup reports back through
+ * its opener window, no cross-site storage involved - and it works in today's
+ * home-screen apps on both platforms (iOS has allowed it since 16.4). This is
+ * also Firebase's own guidance for storage-partitioned browsers when the app
+ * cannot proxy the auth handler onto its own origin, which a GitHub Pages
+ * site cannot. The redirect survives only as the fallback for a browser that
+ * refuses to open the popup at all - no worse than what it replaced.
  */
 export async function signIn() {
   const provider = new authMod.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
 
-  if (isStandalone()) {
-    await authMod.signInWithRedirect(auth, provider);
-    return null; // the page navigates away; result is picked up on return
+  try {
+    const result = await authMod.signInWithPopup(auth, provider);
+    return result.user;
+  } catch (error) {
+    if (error?.code === 'auth/popup-blocked'
+      || error?.code === 'auth/operation-not-supported-in-this-environment') {
+      await authMod.signInWithRedirect(auth, provider);
+      return null; // the page navigates away; result is picked up on return
+    }
+    if (error?.code === 'auth/popup-closed-by-user'
+      || error?.code === 'auth/cancelled-popup-request') {
+      throw new Error('Sign-in was cancelled. Try again when you are ready.');
+    }
+    throw error;
   }
-  const result = await authMod.signInWithPopup(auth, provider);
-  return result.user;
 }
 
 /** Completes a redirect sign-in, if we came back from one. */
