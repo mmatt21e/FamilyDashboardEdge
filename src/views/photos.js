@@ -1649,7 +1649,10 @@ export async function memoriesView() {
   });
 
   const draw = () => {
-    if (state.loadingFiles && !state.files.length) {
+    // `!driveReady` for the same reason as the library view: draw() runs
+    // before loadFiles() has set loadingFiles, and a first-ever open must
+    // show "Looking" rather than a false "Nothing from today yet" flash.
+    if ((state.loadingFiles || !state.driveReady) && !state.files.length) {
       return container.replaceChildren(spinner('Looking for memories…'));
     }
 
@@ -1675,6 +1678,14 @@ export async function memoriesView() {
             ))),
     );
   };
+
+  // The same staged repaint as the library view: the snapshot and the first
+  // Firestore page land mid-load, and without this Memories sat on its
+  // spinner until the whole Drive scan finished.
+  const onFilesChanged = () => { if (container.isConnected) draw(); };
+  window.addEventListener('fd:files-changed', onFilesChanged);
+  container.addEventListener('fd:teardown', () =>
+    window.removeEventListener('fd:files-changed', onFilesChanged), { once: true });
 
   draw();
   await loadFiles();
