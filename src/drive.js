@@ -291,11 +291,6 @@ export async function getScopedToken({ clientId, scope }) {
   });
 }
 
-export function hasDriveAccess() {
-  recallToken();
-  return Boolean(accessToken) && Date.now() < tokenExpiry;
-}
-
 export function forgetDriveAccess() {
   accessToken = null;
   tokenExpiry = 0;
@@ -577,11 +572,6 @@ export async function ensureFolderPath(rootId, segments, { clientId } = {}) {
   return parent;
 }
 
-/** Forgets the folder ids, for when the shared folder is changed or reset. */
-export function forgetFolderCache() {
-  folderCache.clear();
-}
-
 /**
  * Uploads a file into the shared folder.
  *
@@ -659,13 +649,4 @@ export async function moveFile(fileId, { fromId, toId, clientId } = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: '{}',
   });
-}
-
-/** Confirms the configured folder exists and is readable, for the Setup screen. */
-export async function checkFolder(folderId, { clientId } = {}) {
-  const data = await driveFetch(`files/${folderId}?fields=id,name,mimeType`, { clientId });
-  if (data.mimeType !== 'application/vnd.google-apps.folder') {
-    throw new Error('That ID is a file, not a folder.');
-  }
-  return data;
 }
