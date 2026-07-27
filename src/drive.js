@@ -629,6 +629,19 @@ export async function uploadFile(file, { folderId, clientId, onProgress, path = 
 }
 
 /**
+ * A fresh thumbnailLink for one file.
+ *
+ * Drive's thumbnail links expire after a few hours. Re-asking for the link is
+ * a single metadata read - the right response to a tile whose link has died
+ * after the scan finished, where the only other option is downloading the
+ * original.
+ */
+export async function refreshThumbnailLink(fileId, { clientId } = {}) {
+  const data = await driveFetch(`files/${fileId}?fields=thumbnailLink`, { clientId });
+  return data.thumbnailLink ?? null;
+}
+
+/**
  * Moves a file between folders.
  *
  * Under the full drive scope this works on anything in the shared folder,

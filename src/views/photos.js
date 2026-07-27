@@ -11,8 +11,8 @@ import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
 import {
-  listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess, getAccessToken,
-  moveFile, ensureFolderPath,
+  listSharedMedia, fetchFileBlobUrl, refreshThumbnailLink, uploadFile, forgetDriveAccess,
+  getAccessToken, moveFile, ensureFolderPath,
 } from '../drive.js';
 import { cacheGet, cacheSet } from '../local-cache.js';
 import { knownThumb, thumbFromDisk, fetchAndCacheThumb } from '../thumbs.js';
@@ -576,7 +576,26 @@ async function thumbnailFallback(img, record) {
   await new Promise((resolve) => setTimeout(resolve, 0));
   if (!img.isConnected) return;
 
-  await loadBlobInto(img, fresh ?? record);
+  // Rung 3: the scan is over and the link is still dead, so ask Drive for a
+  // fresh one - a single metadata read against the rung below's multi-megabyte
+  // download, and the only rung that can save a video tile at all.
+  const target = fresh ?? record;
+  try {
+    const link = await refreshThumbnailLink(record.driveId, { clientId: state.config.googleClientId });
+    if (link && link !== img.src) {
+      target.thumbnailUrl = link;
+      const cached = await fetchAndCacheThumb(record.driveId, link);
+      if (cached) {
+        img.src = cached;
+        return;
+      }
+      img.addEventListener('error', () => { void loadBlobInto(img, target); }, { once: true });
+      img.src = link;
+      return;
+    }
+  } catch { /* fall through to the last resort */ }
+
+  await loadBlobInto(img, target);
 }
 
 /**
@@ -622,6 +641,13 @@ function fetchCachedBlobUrl(driveId) {
 }
 
 async function loadBlobInto(img, record) {
+  // Never for a video: "the original" is the entire video, downloaded into an
+  // <img> that cannot show it. The size cap alone did not catch this - Drive
+  // omits `size` on some records, which skipped the cap entirely.
+  if (record.kind === KIND.VIDEO) {
+    img.replaceWith(el('div', { class: 'tile__missing' }, '🎬'));
+    return;
+  }
   if (record.size && record.size > BLOB_MAX_BYTES) {
     img.replaceWith(el('div', { class: 'tile__missing' }, '🖼️'));
     return;
