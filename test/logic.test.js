@@ -24,7 +24,7 @@ import {
 } from '../src/catalog.js';
 import {
   emptyFilters, hasActiveFilters, filterPhotos, buildFacets, describeFilters,
-  clearFilter, describeCount, yearWall, PEOPLE_MODE,
+  clearFilter, describeCount, yearWall, buildWallSummary, wallFromSummary, PEOPLE_MODE,
 } from '../src/photo-filter.js';
 import {
   applyEdits, buildEdit, isEmptyEdit, editedFields, normalisePersonName,
@@ -2153,5 +2153,55 @@ describe('the year wall', () => {
     const found = filterPhotos(records, { ...emptyFilters(), undatedOnly: true });
     assert.equal(found.length, 2);
     assert.ok(found.every((r) => !r.takenAt));
+  });
+});
+
+// The stored year wall: what lets Photos open onto its years before any
+// listing is loaded. Counts and one cover per year, rebuilt after every scan.
+describe('wall summary', () => {
+  const rec = (id, takenAt, kind = 'photo', thumb = null) => ({
+    driveId: id, takenAt, kind, thumbnailUrl: thumb,
+  });
+
+  // Newest-first input, matching how records are held everywhere else.
+  const records = [
+    rec('a', '2024-06-01T10:00:00.000Z', 'photo', 'https://t/a'),
+    rec('b', '2024-01-01T10:00:00.000Z', 'photo'),
+    rec('v', '2024-03-01T10:00:00.000Z', 'video', 'https://t/v'),
+    rec('c', '2019-05-01T10:00:00.000Z', 'photo', 'https://t/c'),
+    rec('d', null, 'photo'),
+  ];
+
+  test('counts per year, one library at a time', () => {
+    const summary = buildWallSummary(records, 'photo');
+    assert.equal(summary.total, 4);
+    assert.equal(summary.undated, 1);
+    assert.deepEqual(summary.years.map((y) => [y.year, y.count]), [[2024, 2], [2019, 1]]);
+  });
+
+  test('the newest photo of a year is its cover', () => {
+    const summary = buildWallSummary(records, 'photo');
+    assert.equal(summary.years[0].coverId, 'a');
+    assert.equal(summary.years[0].coverThumbUrl, 'https://t/a');
+    assert.equal(summary.years[1].coverId, 'c');
+  });
+
+  test('videos build their own wall', () => {
+    const summary = buildWallSummary(records, 'video');
+    assert.equal(summary.total, 1);
+    assert.deepEqual(summary.years.map((y) => y.coverId), ['v']);
+  });
+
+  test('a stored summary rebuilds the exact live wall shape', () => {
+    const wall = wallFromSummary(buildWallSummary(records, 'photo'));
+    assert.equal(wall.total, 4);
+    assert.equal(wall.undated, 1);
+    assert.deepEqual(wall.decades.map((d) => d.label), ['2020s', '2010s']);
+    assert.deepEqual(wall.decades[0].years, [{ year: 2024, count: 2 }]);
+  });
+
+  test('a missing or empty summary is an empty wall, not a crash', () => {
+    assert.deepEqual(wallFromSummary(null).years, []);
+    assert.equal(wallFromSummary(undefined).total, 0);
   });
 });

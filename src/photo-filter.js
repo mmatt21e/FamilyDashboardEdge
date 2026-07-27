@@ -290,6 +290,10 @@ export function yearWall(records = []) {
     .map(([year, count]) => ({ year, count }))
     .sort((a, b) => b.year - a.year);
 
+  return { total: records.length, undated, years, decades: groupIntoDecades(years) };
+}
+
+function groupIntoDecades(years) {
   const decades = [];
   for (const entry of years) {
     const label = `${Math.floor(entry.year / 10) * 10}s`;
@@ -301,8 +305,54 @@ export function yearWall(records = []) {
     decade.years.push(entry);
     decade.count += entry.count;
   }
+  return decades;
+}
 
-  return { total: records.length, undated, years, decades };
+/**
+ * A compact, storable description of the year wall.
+ *
+ * This is what lets Photos open onto its years before ANY listing exists:
+ * counts plus one cover per year - the newest photo, since the records arrive
+ * newest-first - is everything a year card needs, and it fits in a few
+ * kilobytes of device storage. Rebuilt after every scan, so uploads and
+ * PhotoSync arrivals update the wall's counts and covers on their own.
+ */
+export function buildWallSummary(records = [], kind = null) {
+  const byYear = new Map();
+  let undated = 0;
+  let total = 0;
+
+  for (const record of records) {
+    if (kind && record.kind !== kind) continue;
+    total += 1;
+    const { year } = dateParts(record);
+    if (!year) { undated += 1; continue; }
+
+    let entry = byYear.get(year);
+    if (!entry) {
+      entry = {
+        year, count: 0,
+        coverId: record.driveId ?? null,
+        coverThumbUrl: record.thumbnailUrl ?? null,
+      };
+      byYear.set(year, entry);
+    }
+    entry.count += 1;
+  }
+
+  const years = [...byYear.values()].sort((a, b) => b.year - a.year);
+  return { total, undated, years };
+}
+
+/** The stored summary, in the exact shape yearWall() produces live. */
+export function wallFromSummary(summary) {
+  const years = (summary?.years ?? []).map(({ year, count }) => ({ year, count }));
+  return {
+    total: summary?.total ?? 0,
+    undated: summary?.undated ?? 0,
+    years,
+    decades: groupIntoDecades(years),
+  };
 }
 
 /** "3 of 2,907 photos" - the line under the heading. */

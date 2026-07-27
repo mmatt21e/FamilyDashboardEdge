@@ -27,7 +27,8 @@ import {
 import { openTagSheet } from './photo-editor.js';
 import {
   emptyFilters, filterPhotos, buildFacets, describeFilters,
-  clearFilter, describeCount, toggleValue, dateParts, yearWall, PEOPLE_MODE,
+  clearFilter, describeCount, toggleValue, dateParts, yearWall,
+  buildWallSummary, wallFromSummary, PEOPLE_MODE,
 } from '../photo-filter.js';
 
 /**
@@ -201,6 +202,7 @@ async function doLoad() {
       records: state.files.slice(0, SNAPSHOT_MAX),
       savedAt: new Date().toISOString(),
     });
+    void refreshWallCache();
 
     void persistNewPointers(records);
     void ensureStructureOnce();
@@ -1157,6 +1159,55 @@ const libraryState = {
 };
 
 /**
+ * The stored year wall, per library.
+ *
+ * Refreshed after every reconcile - which is also what runs after an in-app
+ * upload, and what first notices a PhotoSync arrival - so the wall's counts
+ * and covers keep themselves current. Cover thumbnails the device does not
+ * yet hold are warmed into the thumbnail cache, so the next open paints the
+ * whole years screen from disk without a single network request.
+ */
+function wallCacheKey(kind) {
+  return `wall:${state.config?.driveFolderId ?? ''}:${kind}`;
+}
+
+async function refreshWallCache() {
+  try {
+    for (const kind of [KIND.PHOTO, KIND.VIDEO]) {
+      const summary = buildWallSummary(state.files, kind);
+      await cacheSet(wallCacheKey(kind), summary);
+
+      for (const entry of summary.years) {
+        if (!entry.coverId || !entry.coverThumbUrl) continue;
+        if (await thumbFromDisk(entry.coverId)) continue;
+        await fetchAndCacheThumb(entry.coverId, entry.coverThumbUrl);
+      }
+    }
+  } catch { /* a stale wall just paints yesterday's covers */ }
+}
+
+/**
+ * A year card's image from the stored summary alone - no records needed.
+ * Disk first; the stored link only to warm a cover this device has never
+ * cached, which also stores it for the opens after.
+ */
+function summaryCover(entry) {
+  if (!entry.coverId) return null;
+  const img = el('img', {
+    class: 'year-card__img', loading: 'lazy', decoding: 'async', alt: '',
+  });
+  void (async () => {
+    const disk = await thumbFromDisk(entry.coverId);
+    if (disk) { img.src = disk; return; }
+    if (!entry.coverThumbUrl) return;
+    const fetched = await fetchAndCacheThumb(entry.coverId, entry.coverThumbUrl);
+    if (fetched) { img.src = fetched; return; }
+    img.src = entry.coverThumbUrl;
+  })();
+  return img;
+}
+
+/**
  * The photo a year card wears.
  *
  * The year's photos, newest first (the list is already sorted), preferring
@@ -1184,18 +1235,17 @@ function coverFor(year, records) {
  * claim. Every card says how many photos stand behind it, so the wall doubles
  * as a map of where the library's weight is.
  */
-function yearWallView(records, { onYear, onAll, onUndated, noun = 'photo' }) {
-  const wall = yearWall(records);
+function yearWallView(wall, { cover, onYear, onAll, onUndated, noun = 'photo' }) {
   const [hero, ...restYears] = wall.years;
   const rest = new Set(restYears.map((y) => y.year));
 
   const card = (entry, { hero: isHero = false } = {}) => {
-    const cover = coverFor(entry.year, records);
+    const coverNode = cover?.(entry) ?? null;
     const node = el('button', {
       class: `year-card${isHero ? ' year-card--hero' : ''}`, type: 'button',
       'aria-label': `${entry.year}, ${entry.count} photos`,
     },
-      cover && thumbnail(cover, { className: 'year-card__img' }),
+      coverNode,
       el('span', { class: 'year-card__shade' }),
       el('span', { class: 'year-card__text' },
         el('span', { class: 'year-card__year' }, String(entry.year)),
@@ -1499,6 +1549,30 @@ async function libraryView(kind) {
   const countSlot = el('span', { class: 'muted small' });
   const gridSlot = el('div', {});
 
+  // The stored wall summary, so the years screen can paint before any listing
+  // is loaded. Null on a first-ever open, where the spinner is the honest
+  // thing to show.
+  const cachedWall = await cacheGet(wallCacheKey(kind)).catch(() => null);
+
+  const wallHandlers = {
+    noun: kind === KIND.VIDEO ? 'video' : 'photo',
+    onYear: (year) => {
+      st.filters = { ...emptyFilters(), year };
+      st.mode = 'grid';
+      draw();
+    },
+    onAll: () => {
+      st.filters = emptyFilters();
+      st.mode = 'grid';
+      draw();
+    },
+    onUndated: () => {
+      st.filters = { ...emptyFilters(), undatedOnly: true };
+      st.mode = 'grid';
+      draw();
+    },
+  };
+
   const openPhoto = (record) => {
     const close = openViewer(record, {
       onFilterPerson: (person) => {
@@ -1578,6 +1652,21 @@ async function libraryView(kind) {
     // a spinner forever. `driveReady` is part of the condition so a first-ever
     // open shows "Loading" rather than a false "No photos yet" flash.
     if ((state.loadingFiles || !state.driveReady) && !state.files.length) {
+      // The wall from the last session paints before ANY listing is loaded:
+      // year cards need only their stored counts and cached cover thumbnails,
+      // so this costs a few IndexedDB reads and no network. The live wall
+      // replaces it the moment records land. Entering a year loads that
+      // year's photos then, and not before.
+      if (st.mode === 'years' && cachedWall?.years?.length >= 2) {
+        return container.replaceChildren(...children(
+          el('header', { class: 'view__header' },
+            el('h1', {}, copy.title),
+            el('span', { class: 'muted small' },
+              `${(cachedWall.total ?? 0).toLocaleString()} in the library`),
+          ),
+          yearWallView(wallFromSummary(cachedWall), { ...wallHandlers, cover: summaryCover }),
+        ));
+      }
       // A first scan of a large archive takes a while, so it counts out loud
       // rather than showing a spinner that gives no sign of progress.
       const progress = state.scanProgress;
@@ -1605,7 +1694,8 @@ async function libraryView(kind) {
     // The wall only earns its place when there are years to choose between.
     // A library from a single year - or none - goes straight to the grid.
     const all = media();
-    const wallWorthwhile = yearWall(all).years.length >= 2;
+    const wall = yearWall(all);
+    const wallWorthwhile = wall.years.length >= 2;
 
     if (st.mode === 'years' && wallWorthwhile) {
       container.replaceChildren(...children(
@@ -1614,22 +1704,11 @@ async function libraryView(kind) {
           el('span', { class: 'muted small' }, `${all.length.toLocaleString()} in the library`),
         ),
         ...notices,
-        yearWallView(all, {
-          noun: kind === KIND.VIDEO ? 'video' : 'photo',
-          onYear: (year) => {
-            st.filters = { ...emptyFilters(), year };
-            st.mode = 'grid';
-            draw();
-          },
-          onAll: () => {
-            st.filters = emptyFilters();
-            st.mode = 'grid';
-            draw();
-          },
-          onUndated: () => {
-            st.filters = { ...emptyFilters(), undatedOnly: true };
-            st.mode = 'grid';
-            draw();
+        yearWallView(wall, {
+          ...wallHandlers,
+          cover: (entry) => {
+            const record = coverFor(entry.year, all);
+            return record ? thumbnail(record, { className: 'year-card__img' }) : null;
           },
         }),
       ));
