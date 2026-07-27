@@ -145,17 +145,57 @@ function recallToken() {
  */
 export async function getAccessToken({ interactive = false, clientId } = {}) {
   recallToken();
-  if (accessToken && Date.now() < tokenExpiry - 60_000) return accessToken;
-
-  if (!interactive) {
-    try {
-      return await requestToken({ clientId, prompt: 'none' });
-    } catch {
-      // Needs a human: no Google session, no prior grant, or Safari blocking
-      // the cookie the silent path relies on. Fall through and ask properly.
+  const now = Date.now();
+  if (accessToken && now < tokenExpiry - 60_000) {
+    // Renew ahead of expiry, while the old token still works - and silently
+    // ONLY: `prompt: 'none'` either succeeds with no window or fails without
+    // asking, so a background renewal can never put Google UI on screen at a
+    // random moment. If it fails, the visible path below handles real expiry.
+    if (now > tokenExpiry - TOKEN_RENEW_AHEAD_MS) {
+      void singleFlight(SCOPES, () => requestToken({ clientId, prompt: 'none' }))
+        .catch(() => { /* the current token still works */ });
     }
+    return accessToken;
   }
-  return requestToken({ clientId, prompt: interactive ? 'consent' : '' });
+
+  return singleFlight(SCOPES, async () => {
+    // A caller that queued behind a renewal finds its token already here.
+    if (accessToken && Date.now() < tokenExpiry - 60_000) return accessToken;
+
+    if (!interactive) {
+      try {
+        return await requestToken({ clientId, prompt: 'none' });
+      } catch {
+        // Needs a human: no Google session, no prior grant, or Safari blocking
+        // the cookie the silent path relies on. Fall through and ask properly.
+      }
+    }
+    return requestToken({ clientId, prompt: interactive ? 'consent' : '' });
+  });
+}
+
+/** How long before expiry the background renewal starts. */
+const TOKEN_RENEW_AHEAD_MS = 5 * 60_000;
+
+/**
+ * One token acquisition per scope at a time.
+ *
+ * requestToken() reassigns the shared token client's callback, so two
+ * overlapping acquisitions meant the second silently disconnected the first,
+ * which could then only settle by its 20-second timeout - surfacing as
+ * "Google never answered". The overlap is not hypothetical: doLoad() fires a
+ * prewarm request while the scan's own driveFetch calls ask too. Concurrent
+ * callers now share one in-flight promise per scope.
+ */
+const tokenRequests = new Map();
+
+function singleFlight(scope, start) {
+  let pending = tokenRequests.get(scope);
+  if (!pending) {
+    pending = start().finally(() => tokenRequests.delete(scope));
+    tokenRequests.set(scope, pending);
+  }
+  return pending;
 }
 
 async function requestToken({ clientId, prompt, scope = SCOPES }) {
@@ -241,12 +281,14 @@ export async function getScopedToken({ clientId, scope }) {
   const cached = scopedTokens.get(scope);
   if (cached && Date.now() < cached.expiry - 60_000) return cached.token;
 
-  try {
-    return await requestToken({ clientId, prompt: 'none', scope });
-  } catch {
-    // First time: Google needs to show the consent for this scope.
-    return requestToken({ clientId, prompt: '', scope });
-  }
+  return singleFlight(scope, async () => {
+    try {
+      return await requestToken({ clientId, prompt: 'none', scope });
+    } catch {
+      // First time: Google needs to show the consent for this scope.
+      return requestToken({ clientId, prompt: '', scope });
+    }
+  });
 }
 
 export function hasDriveAccess() {
