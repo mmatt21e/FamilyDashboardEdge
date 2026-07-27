@@ -105,6 +105,12 @@ export async function render() {
   const view = match ? match.render : notFound;
   if (!view) return;
 
+  // Give the outgoing view its teardown on EVERY navigation, not only into
+  // gated routes: leaving Photos for Settings must release its listeners just
+  // as surely as leaving it for the calendar. A view cannot know which route
+  // comes next, so the router owns this.
+  outlet.firstElementChild?.dispatchEvent(new CustomEvent('fd:teardown'));
+
   try {
     const result = await view(match?.params ?? {}, outlet);
     // A view may either render into the outlet itself or return a node.
