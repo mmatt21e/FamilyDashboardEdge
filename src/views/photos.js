@@ -223,6 +223,42 @@ async function loadBlobInto(img, record) {
   }
 }
 
+/**
+ * The grid, rendered in chunks as the user scrolls.
+ *
+ * Building a tile per record up front meant an archive of thousands became
+ * thousands of DOM nodes on first paint - loading="lazy" spares the network,
+ * but not layout or memory on a phone. A sentinel below the grid appends the
+ * next chunk well before it scrolls into view, so the DOM stays proportional
+ * to what has been looked at.
+ */
+const GRID_CHUNK = 60;
+
+function mediaGrid(records, onOpen) {
+  const grid = el('div', { class: 'grid' });
+  const sentinel = el('div');
+  let rendered = 0;
+
+  const appendChunk = () => {
+    const next = records.slice(rendered, rendered + GRID_CHUNK);
+    rendered += next.length;
+    grid.append(...next.map((record) => tile(record, onOpen)));
+    if (rendered >= records.length) {
+      observer.disconnect();
+      sentinel.remove();
+    }
+  };
+
+  const observer = new IntersectionObserver(
+    (entries) => { if (entries.some((entry) => entry.isIntersecting)) appendChunk(); },
+    { rootMargin: '1200px' }, // start building roughly two screens ahead
+  );
+
+  appendChunk();
+  observer.observe(sentinel);
+  return el('div', {}, grid, sentinel);
+}
+
 function tile(record, onOpen) {
   const node = el('button', { class: 'tile', type: 'button', 'aria-label': record.name },
     thumbnail(record),
@@ -375,7 +411,7 @@ export async function photosView() {
       media.length === 0
         ? emptyState('📷', 'No photos yet',
             'Once PhotoSync is set up on a phone, photos appear here on their own. You can also add some directly.')
-        : el('div', { class: 'grid' }, media.map((record) => tile(record, openViewer))),
+        : mediaGrid(media, openViewer),
     );
   };
 
