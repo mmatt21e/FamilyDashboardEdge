@@ -209,7 +209,15 @@ function thumbnail(record) {
 
 async function loadBlobInto(img, record) {
   try {
-    img.src = await fetchFileBlobUrl(record.driveId, { clientId: state.config.googleClientId });
+    const url = await fetchFileBlobUrl(record.driveId, { clientId: state.config.googleClientId });
+    // Once the image has loaded (or failed), the object URL has done its job.
+    // Left alive, every blob-backed tile pins its full-size bytes in memory
+    // for the life of the page - a browse through a big grid used to
+    // accumulate until the tab fell over.
+    const done = () => URL.revokeObjectURL(url);
+    img.addEventListener('load', done, { once: true });
+    img.addEventListener('error', done, { once: true });
+    img.src = url;
   } catch {
     img.replaceWith(el('div', { class: 'tile__missing' }, '🖼️'));
   }
