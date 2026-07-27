@@ -188,8 +188,7 @@ function registerRoutes() {
         el('a', { class: 'btn', href: '#/settings' }, 'Open Settings'),
       );
     }
-    // Let a previous live subscription tear itself down before replacing it.
-    outlet.firstElementChild?.dispatchEvent(new CustomEvent('fd:teardown'));
+    // Teardown of the previous view happens in router.render() for every route.
     return view(params, outlet);
   };
 

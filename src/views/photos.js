@@ -8,7 +8,7 @@
 
 import { el, spinner, emptyState, toast, formatDate } from '../ui.js';
 import { interpretDriveFailure } from '../diagnose.js';
-import { state, update, filesAreStale } from '../store.js';
+import { state, update, subscribe, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
 import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from '../drive.js';
 import { toPointerRecord, sortByTakenDesc, KIND } from '../files.js';
@@ -272,6 +272,12 @@ export async function photosView() {
     );
   };
 
+  // Repaint on every store change. Stage 1 of loadFiles puts the cached index
+  // into the store within a beat; without this the view sat unchanged until
+  // the whole Drive scan finished, so the fast path existed but never drew.
+  const unsubscribe = subscribe(draw);
+  container.addEventListener('fd:teardown', () => unsubscribe(), { once: true });
+
   draw();
   await loadFiles();
   draw();
@@ -308,6 +314,10 @@ export async function memoriesView() {
             ))),
     );
   };
+
+  // Same immediate repaint from the cached index as the Photos view.
+  const unsubscribe = subscribe(draw);
+  container.addEventListener('fd:teardown', () => unsubscribe(), { once: true });
 
   draw();
   await loadFiles();

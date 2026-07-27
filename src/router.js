@@ -84,6 +84,12 @@ export async function render() {
   const view = match ? match.render : notFound;
   if (!view) return;
 
+  // Give the outgoing view its teardown before anything replaces it, so live
+  // subscriptions and store listeners do not outlive their DOM. Done here, on
+  // every navigation, rather than per-route: a view cannot know which route
+  // comes next.
+  outlet.firstElementChild?.dispatchEvent(new CustomEvent('fd:teardown'));
+
   try {
     const result = await view(match?.params ?? {}, outlet);
     // A view may either render into the outlet itself or return a node.
