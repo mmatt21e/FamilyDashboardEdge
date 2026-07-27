@@ -41,6 +41,10 @@ export async function loadFiles({ force = false } = {}) {
 }
 
 async function doLoad() {
+  // Set synchronously, before any await: the view draws the moment it opens,
+  // and this flag is the difference between a spinner and a first-time visitor
+  // staring at "No photos yet" while the folder is still being read.
+  update({ loadingFiles: true, fileError: null });
 
   // --- stage 1: the cached index -------------------------------------------
   if (!state.files.length) {
@@ -56,7 +60,6 @@ async function doLoad() {
   }
 
   // --- stage 2: reconcile against Drive ------------------------------------
-  update({ loadingFiles: true, fileError: null });
   try {
     const raw = await listSharedMedia(state.config.driveFolderId, {
       clientId: state.config.googleClientId,
