@@ -112,6 +112,24 @@ export async function setDoc(path, id, data, { merge = true } = {}) {
   await dbMod.setDoc(dbMod.doc(db, path, id), data, { merge });
 }
 
+/**
+ * Writes many documents in one round trip per 500, Firestore's batch limit.
+ * Two hundred individual awaited writes took tens of seconds on a phone; the
+ * same work is one commit.
+ *
+ * @param {string} path
+ * @param {Array<{id: string, data: object}>} entries
+ */
+export async function setDocsBatch(path, entries, { merge = true } = {}) {
+  for (let i = 0; i < entries.length; i += 500) {
+    const batch = dbMod.writeBatch(db);
+    for (const { id, data } of entries.slice(i, i + 500)) {
+      batch.set(dbMod.doc(db, path, id), data, { merge });
+    }
+    await batch.commit();
+  }
+}
+
 export async function addDoc(path, data) {
   const ref = await dbMod.addDoc(dbMod.collection(db, path), data);
   return ref.id;

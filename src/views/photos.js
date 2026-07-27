@@ -51,6 +51,9 @@ async function doLoad() {
     try {
       const cached = await fb.queryDocs('files', { orderBy: ['takenAt', 'desc'], limit: 500 });
       if (cached.length) {
+        // These records came from Firestore, so their ids are by definition
+        // already persisted - seed the known-id set with them.
+        rememberPersistedIds(cached.map((r) => r.driveId ?? r.id));
         update({ files: sortByTakenDesc(cached), driveReady: true });
         window.dispatchEvent(new CustomEvent('fd:files-changed'));
       }
@@ -95,20 +98,44 @@ async function doLoad() {
  * Firestore free tier in one go for no benefit - the grid is already rendered
  * from the Drive scan by this point. The backlog fills in over subsequent
  * opens, and nothing breaks while it does.
+ *
+ * "Already in Firestore" is tracked in a device-local id set rather than
+ * re-queried: reading a thousand documents on every open just to learn their
+ * ids was the app's single biggest Firestore cost, and once the collection
+ * outgrew that query the same records were re-written on every open, forever.
+ * The set is seeded from the stage-1 cache (records that came *from*
+ * Firestore) and extended with every id this device writes. Ids another
+ * device wrote that this one has not seen just mean one redundant merge
+ * write here - harmless, and the set converges.
  */
 const MAX_WRITES_PER_RUN = 200;
+const PERSISTED_IDS_KEY = 'fd.files.persisted.v1';
+const PERSISTED_IDS_MAX = 20_000;
+
+function readPersistedIds() {
+  try { return new Set(JSON.parse(localStorage.getItem(PERSISTED_IDS_KEY) ?? '[]')); }
+  catch { return new Set(); }
+}
+
+function rememberPersistedIds(ids) {
+  try {
+    const set = readPersistedIds();
+    for (const id of ids) if (id) set.add(id);
+    // Insertion order makes slice(-max) keep the newest-remembered ids.
+    localStorage.setItem(PERSISTED_IDS_KEY, JSON.stringify([...set].slice(-PERSISTED_IDS_MAX)));
+  } catch { /* storage full or unavailable; worst case is a redundant write later */ }
+}
 
 async function persistNewPointers(records) {
   try {
-    const existing = await fb.queryDocs('files', { limit: 1000 });
-    const known = new Set(existing.map((r) => r.driveId ?? r.id));
-
+    const known = readPersistedIds();
     const fresh = records.filter((r) => !known.has(r.driveId)).slice(0, MAX_WRITES_PER_RUN);
-    for (const record of fresh) {
-      // Keyed on the Drive id so a re-scan updates in place rather than
-      // creating a second record for the same photo.
-      await fb.setDoc('files', record.driveId, record);
-    }
+    if (!fresh.length) return;
+
+    // Keyed on the Drive id so a re-scan updates in place rather than
+    // creating a second record for the same photo.
+    await fb.setDocsBatch('files', fresh.map((r) => ({ id: r.driveId, data: r })));
+    rememberPersistedIds(fresh.map((r) => r.driveId));
   } catch {
     // Never let a caching failure break the photo grid; it is only an index.
   }
