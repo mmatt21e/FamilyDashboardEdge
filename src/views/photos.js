@@ -664,6 +664,24 @@ const blobCache = new Map();
 const blobQueue = [];
 let blobActive = 0;
 
+/**
+ * The blob cache holds full originals - up to 10MB tiles and, on the non-SW
+ * video path, whole videos - and nothing ever revoked them, so a long browse
+ * accumulated every fallback and every viewer open in memory until the tab
+ * fell over. Bounded FIFO instead: far larger than a screenful, so an evicted
+ * URL is never one that is still on screen.
+ */
+const BLOB_CACHE_MAX = 24;
+
+function trimBlobCache() {
+  while (blobCache.size > BLOB_CACHE_MAX) {
+    const [oldest] = blobCache.keys();
+    const evicted = blobCache.get(oldest);
+    blobCache.delete(oldest);
+    void Promise.resolve(evicted).then((url) => URL.revokeObjectURL(url)).catch(() => {});
+  }
+}
+
 function pumpBlobQueue() {
   while (blobActive < BLOB_CONCURRENCY && blobQueue.length) {
     const { task, resolve, reject } = blobQueue.shift();
@@ -682,8 +700,10 @@ function fetchCachedBlobUrl(driveId) {
       });
       pumpBlobQueue();
     });
-    // A failure is evicted so a retry can succeed; a success stays for the session.
+    // A failure is evicted so a retry can succeed; a success stays until the
+    // FIFO bound above pushes it out.
     blobCache.set(driveId, queued.catch((error) => { blobCache.delete(driveId); throw error; }));
+    trimBlobCache();
   }
   return blobCache.get(driveId);
 }

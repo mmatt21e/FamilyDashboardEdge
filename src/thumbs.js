@@ -41,6 +41,18 @@ export function knownThumb(driveId) {
   return inMemory.get(driveId) ?? null;
 }
 
+/**
+ * Replaces an in-memory entry, revoking the object URL it displaces. Without
+ * the revoke, every replaced or pruned entry kept its decoded bytes alive in
+ * the browser for the life of the page - the map was bounded, the memory
+ * behind it was not.
+ */
+function remember(driveId, url) {
+  const previous = inMemory.get(driveId);
+  if (previous && previous !== url) URL.revokeObjectURL(previous);
+  inMemory.set(driveId, url);
+}
+
 /** The device's copy, if a previous session stored one. */
 export async function thumbFromDisk(driveId) {
   const known = inMemory.get(driveId);
@@ -50,7 +62,7 @@ export async function thumbFromDisk(driveId) {
   if (!(blob instanceof Blob) || !blob.size) return null;
 
   const url = URL.createObjectURL(blob);
-  inMemory.set(driveId, url);
+  remember(driveId, url);
   return url;
 }
 
@@ -91,7 +103,7 @@ export async function fetchAndCacheThumb(driveId, thumbnailUrl) {
     });
 
     const url = URL.createObjectURL(blob);
-    inMemory.set(driveId, url);
+    remember(driveId, url);
     if (blob.size <= MAX_BYTES_EACH) void persist(driveId, blob);
     return url;
   } catch {
@@ -110,11 +122,16 @@ function persist(driveId, blob) {
   persistChain = persistChain.then(async () => {
     await cacheSet(KEY_PREFIX + driveId, blob);
 
-    const index = (await cacheGet(INDEX_KEY)) ?? [];
+    let index = (await cacheGet(INDEX_KEY)) ?? [];
+    // Deduplicate on re-persist, or the index inflates with repeats and the
+    // prune below evicts live thumbnails while the duplicates survive.
+    if (index.includes(driveId)) index = index.filter((id) => id !== driveId);
     index.push(driveId);
     if (index.length > MAX_CACHED) {
       for (const stale of index.splice(0, PRUNE_BATCH)) {
         await cacheDelete(KEY_PREFIX + stale);
+        const url = inMemory.get(stale);
+        if (url) URL.revokeObjectURL(url);
         inMemory.delete(stale);
       }
     }
