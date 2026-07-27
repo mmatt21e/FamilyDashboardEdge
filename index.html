@@ -20,6 +20,19 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles/app.css">
+
+<!-- The boot path's biggest waits, started before src/app.js even parses.
+     The Firebase SDK modules begin downloading now rather than after the
+     config check (the version here must match SDK in src/firebase.js), and
+     the TLS handshakes to Google's backends are done by the time the first
+     real request needs them. Costs an unconfigured device one SDK download
+     it may not use; saves every configured open a serial round trip. -->
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://accounts.google.com" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js" crossorigin>
 </head>
 <body>
 <!-- Rendered into by src/app.js. The inline fallback below is replaced on boot;

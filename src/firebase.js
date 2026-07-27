@@ -7,6 +7,8 @@
  * use.
  */
 
+// Version must match the modulepreload links in index.html, which start these
+// downloads before this module even runs.
 const SDK = 'https://www.gstatic.com/firebasejs/11.0.2';
 
 let app = null;

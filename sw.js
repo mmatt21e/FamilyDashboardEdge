@@ -20,6 +20,13 @@ const BUILD_SHA = '__BUILD_SHA__';
 
 const CACHE = `family-dashboard-${CACHE_VERSION}-${BUILD_SHA}`;
 
+// The Firebase SDK from gstatic: public, immutable code under a versioned URL,
+// so unlike every other cross-origin request it is safe to cache - and it is
+// the boot path's single biggest download. Kept in its own cache because the
+// URLs are version-stamped and never go stale, so it must survive the
+// per-deploy shell cache turnover.
+const SDK_CACHE = 'family-dashboard-sdk-v1';
+
 const SHELL = [
   './',
   './index.html',
@@ -77,7 +84,9 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(
+        keys.filter((k) => k !== CACHE && k !== SDK_CACHE).map((k) => caches.delete(k)),
+      ))
       .then(() => self.clients.claim()),
   );
 });
@@ -173,8 +182,24 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Never touch anything cross-origin: Firebase, Drive, Google sign-in and the
-  // Firebase SDK on gstatic must always go to the network, and caching an
+  // The versioned Firebase SDK - see SDK_CACHE above. Cache-first: the URL is
+  // immutable, so a hit can never be stale, and the boot's biggest download
+  // becomes local from the second open.
+  if (url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/')) {
+    event.respondWith(
+      caches.open(SDK_CACHE).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+        const response = await fetch(request);
+        if (response.ok) void cache.put(request, response.clone());
+        return response;
+      }),
+    );
+    return;
+  }
+
+  // Never touch anything else cross-origin: Firebase's backends, Drive and
+  // Google sign-in must always go to the network, and caching an
   // authenticated response would be a genuine privacy problem.
   if (url.origin !== self.location.origin) return;
 
