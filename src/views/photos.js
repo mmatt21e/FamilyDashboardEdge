@@ -164,6 +164,9 @@ async function doLoad() {
         onPage: (rows, { page, done }) => { if (page === 1 && !done) paint(rows); },
       });
       if (cached.length) paint(cached);
+      // This read just enumerated everything Firestore holds - seed the
+      // known-ids set with it, so persistNewPointers never has to.
+      void rememberPersistedIds(cached.map((r) => r.driveId ?? r.id));
     } catch {
       // No cache yet, or rules not published. Fall through to the Drive scan.
     }
@@ -306,10 +309,54 @@ async function ensureStructureOnce() {
  */
 const MAX_WRITES_PER_RUN = 2000;
 
+/**
+ * Which pointer ids Firestore already has, tracked on the device.
+ *
+ * This used to be answered by reading the ENTIRE files collection on every
+ * scan - for a twenty-thousand-photo library, twenty thousand document reads
+ * per open, just to compute a set of ids. The set now lives in IndexedDB:
+ * seeded once (from stage 1's full read when it runs anyway, or one deliberate
+ * read on a device that has never tracked it), then extended with every id
+ * this device writes. Ids another device wrote that this one has not seen
+ * cost at most one redundant merge write each before the set converges.
+ *
+ * Reads and writes of the set are chained through one promise for the same
+ * reason as the thumbnail index: two concurrent read-modify-writes would lose
+ * each other's ids.
+ */
+const PERSISTED_IDS_MAX = 50_000;
+let persistedChain = Promise.resolve();
+
+function persistedIdsKey() {
+  return `persisted:${state.config?.driveFolderId ?? ''}`;
+}
+
+function withPersistedIds(fn) {
+  const run = persistedChain.then(fn);
+  persistedChain = run.catch(() => {});
+  return run;
+}
+
+function rememberPersistedIds(ids) {
+  return withPersistedIds(async () => {
+    const saved = (await cacheGet(persistedIdsKey())) ?? [];
+    const set = new Set(saved);
+    for (const id of ids) if (id) set.add(id);
+    // Insertion order makes slice(-max) keep the newest-remembered ids.
+    await cacheSet(persistedIdsKey(), [...set].slice(-PERSISTED_IDS_MAX));
+  });
+}
+
 async function persistNewPointers(records) {
   try {
-    const existing = await fb.readAll('files');
-    const known = new Set(existing.map((r) => r.driveId ?? r.id));
+    let known = new Set((await withPersistedIds(() => cacheGet(persistedIdsKey()))) ?? []);
+    if (!known.size) {
+      // A device that has never tracked ids pays the full read once, to seed -
+      // instead of on every open, forever.
+      const existing = await fb.readAll('files');
+      await rememberPersistedIds(existing.map((r) => r.driveId ?? r.id));
+      known = new Set(existing.map((r) => r.driveId ?? r.id));
+    }
 
     const fresh = records.filter((r) => !known.has(r.driveId)).slice(0, MAX_WRITES_PER_RUN);
     if (!fresh.length) return;
@@ -317,6 +364,7 @@ async function persistNewPointers(records) {
     // Keyed on the Drive id so a re-scan updates in place rather than creating
     // a second record for the same photo.
     await fb.writeBatched(fresh.map((record) => ({ path: 'files', id: record.driveId, data: record })));
+    await rememberPersistedIds(fresh.map((record) => record.driveId));
   } catch {
     // Never let a caching failure break the photo grid; it is only an index.
   }
