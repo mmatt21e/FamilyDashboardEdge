@@ -1432,6 +1432,7 @@ function photoGrid(records, onOpen) {
     shown += next.length;
 
     if (shown >= records.length) {
+      autoMore?.disconnect();
       more.remove();
     } else {
       more.textContent = `Show more (${(records.length - shown).toLocaleString()} left)`;
@@ -1440,7 +1441,19 @@ function photoGrid(records, onOpen) {
   };
 
   more.addEventListener('click', showNext);
+
+  // The next page appends itself when the button nears the viewport, so a
+  // long scroll never stops at a button - which stays, as the fallback and
+  // as the honest marker of how much is left.
+  const autoMore = typeof IntersectionObserver !== 'undefined'
+    ? new IntersectionObserver(
+        (entries) => { if (entries.some((entry) => entry.isIntersecting)) showNext(); },
+        { rootMargin: '1200px' },
+      )
+    : null;
+
   showNext();
+  if (more.isConnected) autoMore?.observe(more);
   return wrap;
 }
 
