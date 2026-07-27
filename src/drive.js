@@ -386,12 +386,3 @@ export async function uploadFile(file, { folderId, clientId, onProgress } = {}) 
     xhr.send(body);
   });
 }
-
-/** Confirms the configured folder exists and is readable, for the Setup screen. */
-export async function checkFolder(folderId, { clientId } = {}) {
-  const data = await driveFetch(`files/${folderId}?fields=id,name,mimeType`, { clientId });
-  if (data.mimeType !== 'application/vnd.google-apps.folder') {
-    throw new Error('That ID is a file, not a folder.');
-  }
-  return data;
-}

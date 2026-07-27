@@ -187,6 +187,10 @@ function thumbnail(record) {
 
   const refresh = async () => {
     try {
+      // The failed response may be sitting in the service worker's thumbnail
+      // cache (opaque responses cannot be told apart from good ones when they
+      // are stored); drop it so the retry actually retries.
+      await purgeCachedThumbnail(record.thumbnailUrl);
       const fresh = await refreshThumbnailLink(record.driveId, { clientId: state.config.googleClientId });
       if (fresh && fresh !== record.thumbnailUrl) {
         record.thumbnailUrl = fresh; // so the viewer benefits from the refresh too
@@ -205,6 +209,19 @@ function thumbnail(record) {
     void refresh();
   }
   return img;
+}
+
+/**
+ * Drops one thumbnail from the service worker's cache. Kept in step with the
+ * key scheme in sw.js: origin + pathname, query string stripped.
+ */
+async function purgeCachedThumbnail(thumbnailUrl) {
+  if (!thumbnailUrl) return;
+  try {
+    const url = new URL(thumbnailUrl);
+    const cache = await caches.open('family-dashboard-thumbs-v1');
+    await cache.delete(url.origin + url.pathname);
+  } catch { /* no cache to purge */ }
 }
 
 async function loadBlobInto(img, record) {
@@ -318,7 +335,10 @@ function openViewer(record) {
         const scaled = record.thumbnailUrl?.replace(/=s\d+/, '=s1600');
         if (scaled) {
           // An expired link falls back to the original, not to a broken image.
-          media.addEventListener('error', () => { showBlob().catch(failed); }, { once: true });
+          media.addEventListener('error', () => {
+            void purgeCachedThumbnail(scaled);
+            showBlob().catch(failed);
+          }, { once: true });
           media.src = scaled;
         } else {
           await showBlob();
