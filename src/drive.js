@@ -22,6 +22,8 @@
  * doing.
  */
 
+import { state } from './store.js';
+
 const GIS_SRC = 'https://accounts.google.com/gsi/client';
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
@@ -32,9 +34,40 @@ let gisLoaded = null;
 let tokenClient = null;
 let accessToken = null;
 let tokenExpiry = 0;
+let tokenRequest = null; // the in-flight request, so concurrent callers share one popup
 
 const GIS_LOAD_TIMEOUT_MS = 15_000;
 const TOKEN_TIMEOUT_MS = 20_000;
+
+/**
+ * Tokens are kept for the session, not just the page load.
+ *
+ * GIS has no invisible refresh: requestAccessToken() always opens a popup to
+ * accounts.google.com, which closes itself when consent was already given.
+ * That flash on every open of Photos came mostly from holding the token in a
+ * variable, so a reload or a suspended PWA started from nothing every time.
+ * sessionStorage keeps the token for its full hour across reloads, and still
+ * dies with the browser session - deliberately narrower than localStorage,
+ * since this is a bearer token.
+ */
+const TOKEN_STORE_KEY = 'fd.drive.token.v1';
+
+/** How long before expiry we renew, while the old token still works. */
+const TOKEN_RENEW_AHEAD_MS = 5 * 60_000;
+
+try {
+  const saved = JSON.parse(sessionStorage.getItem(TOKEN_STORE_KEY) ?? 'null');
+  if (saved?.token && Date.now() < Number(saved.expiry ?? 0)) {
+    accessToken = saved.token;
+    tokenExpiry = Number(saved.expiry);
+  }
+} catch { /* no storage or a corrupt entry - just re-request */ }
+
+function storeToken() {
+  try {
+    sessionStorage.setItem(TOKEN_STORE_KEY, JSON.stringify({ token: accessToken, expiry: tokenExpiry }));
+  } catch { /* private mode etc.; the in-memory copy still works */ }
+}
 
 function loadGis() {
   if (gisLoaded) return gisLoaded;
@@ -71,8 +104,34 @@ function loadGis() {
  * prompt, so the family is not asked to approve something every time.
  */
 export async function getAccessToken({ interactive = false, clientId } = {}) {
-  if (accessToken && Date.now() < tokenExpiry - 60_000) return accessToken;
+  const now = Date.now();
+  if (accessToken && now < tokenExpiry - 60_000) {
+    // Renew ahead of expiry, while the current token still works: the popup
+    // flash then happens at a predictable moment rather than a Drive call
+    // failing an hour into a browse.
+    if (now > tokenExpiry - TOKEN_RENEW_AHEAD_MS) {
+      requestToken({ clientId }).catch(() => { /* the current token still works */ });
+    }
+    return accessToken;
+  }
+  return requestToken({ interactive, clientId });
+}
 
+/**
+ * One token request at a time. A grid of tiles all discovering the token has
+ * expired must share a single request: each caller used to reassign
+ * tokenClient.callback, so every promise but the last one only ever settled by
+ * timeout - and Google was asked several times over.
+ */
+function requestToken({ interactive = false, clientId } = {}) {
+  if (!tokenRequest) {
+    tokenRequest = obtainToken({ interactive, clientId })
+      .finally(() => { tokenRequest = null; });
+  }
+  return tokenRequest;
+}
+
+async function obtainToken({ interactive, clientId }) {
   await loadGis();
   if (!tokenClient) {
     tokenClient = window.google.accounts.oauth2.initTokenClient({
@@ -115,6 +174,7 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
       }
       accessToken = response.access_token;
       tokenExpiry = Date.now() + Number(response.expires_in ?? 3600) * 1000;
+      storeToken();
       finish(resolve, accessToken);
     };
 
@@ -125,7 +185,14 @@ export async function getAccessToken({ interactive = false, clientId } = {}) {
     };
 
     try {
-      tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+      tokenClient.requestAccessToken({
+        prompt: interactive ? 'consent' : '',
+        // The account is already known - it is whoever signed in with Firebase.
+        // Without the hint, anyone with several Google accounts gets a full
+        // account-chooser page that stays open, instead of a popup that closes
+        // itself.
+        login_hint: state.user?.email ?? undefined,
+      });
     } catch (error) {
       finish(reject, error);
     }
@@ -139,6 +206,7 @@ export function hasDriveAccess() {
 export function forgetDriveAccess() {
   accessToken = null;
   tokenExpiry = 0;
+  try { sessionStorage.removeItem(TOKEN_STORE_KEY); } catch { /* nothing stored */ }
 }
 
 async function driveFetch(path, { clientId, ...options } = {}) {
