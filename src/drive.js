@@ -258,20 +258,50 @@ export async function listFolder(folderId, { clientId, pageSize = 200, pageToken
 }
 
 /**
+ * All children of a folder, following page tokens up to maxItems.
+ *
+ * The listing is newest-first (orderBy createdTime desc), so when a folder
+ * holds more than maxItems it is the oldest files that fall off - the right
+ * end for a photo archive. The caller is told, so the UI can say so instead
+ * of silently showing a partial folder.
+ */
+async function listFolderAll(folderId, { clientId, maxItems = 1000 } = {}) {
+  const files = [];
+  let pageToken = null;
+  let truncated = false;
+
+  do {
+    const page = await listFolder(folderId, {
+      clientId,
+      pageSize: Math.min(1000, maxItems - files.length), // 1000 is Drive's ceiling per page
+      pageToken,
+    });
+    files.push(...page.files);
+    pageToken = page.nextPageToken;
+    if (pageToken && files.length >= maxItems) { truncated = true; break; }
+  } while (pageToken);
+
+  return { files, truncated };
+}
+
+/**
  * Walks the shared folder including one level of per-person subfolders.
  *
  * PhotoSync is normally pointed at a subfolder per phone, so the folder name is
  * how we attribute a photo to a person - see toPointerRecord in files.js.
  * Depth is capped at one level deliberately: a runaway recursion over a Drive
- * with thousands of folders would be slow and expensive on a phone.
+ * with thousands of folders would be slow and expensive on a phone. Each
+ * folder is capped at maxPerFolder newest files, and `truncated` says whether
+ * any folder had more.
  */
-export async function listSharedMedia(folderId, { clientId, maxPerFolder = 200 } = {}) {
-  const results = [];
+export async function listSharedMedia(folderId, { clientId, maxPerFolder = 1000 } = {}) {
+  const items = [];
 
-  const root = await listFolder(folderId, { clientId, pageSize: maxPerFolder });
+  const root = await listFolderAll(folderId, { clientId, maxItems: maxPerFolder });
+  let truncated = root.truncated;
   for (const file of root.files) {
     if (file.mimeType !== 'application/vnd.google-apps.folder') {
-      results.push({ file, folderName: null });
+      items.push({ file, folderName: null });
     }
   }
 
@@ -283,19 +313,20 @@ export async function listSharedMedia(folderId, { clientId, maxPerFolder = 200 }
   // after another multiplied the scan time by the size of the family.
   // allSettled, because one unreadable subfolder must not blank the grid.
   const pages = await Promise.allSettled(
-    subfolders.map((folder) => listFolder(folder.id, { clientId, pageSize: maxPerFolder })),
+    subfolders.map((folder) => listFolderAll(folder.id, { clientId, maxItems: maxPerFolder })),
   );
 
   pages.forEach((page, index) => {
     if (page.status !== 'fulfilled') return;
+    truncated = truncated || page.value.truncated;
     for (const file of page.value.files) {
       if (file.mimeType !== 'application/vnd.google-apps.folder') {
-        results.push({ file, folderName: subfolders[index].name });
+        items.push({ file, folderName: subfolders[index].name });
       }
     }
   });
 
-  return results;
+  return { items, truncated };
 }
 
 /** A URL the app can show an image from. Needs the token, so images are fetched as blobs. */

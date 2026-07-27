@@ -17,6 +17,7 @@ export const state = {
   member: null,
   modules: resolveState(null),
   files: [],          // pointer records, newest first
+  filesTruncated: false, // true when a folder held more than the scan cap
   filesLoadedAt: 0,
   driveReady: false,
   loadingFiles: false,

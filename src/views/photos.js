@@ -61,15 +61,16 @@ async function doLoad() {
 
   // --- stage 2: reconcile against Drive ------------------------------------
   try {
-    const raw = await listSharedMedia(state.config.driveFolderId, {
+    const { items, truncated } = await listSharedMedia(state.config.driveFolderId, {
       clientId: state.config.googleClientId,
     });
-    const records = raw
+    const records = items
       .map(({ file, folderName }) => toPointerRecord(file, { folderName }))
       .filter(Boolean);
 
     update({
       files: sortByTakenDesc(records),
+      filesTruncated: truncated,
       filesLoadedAt: Date.now(),
       driveReady: true,
       loadingFiles: false,
@@ -265,7 +266,10 @@ export async function photosView() {
     container.replaceChildren(
       el('header', { class: 'view__header' },
         el('h1', {}, 'Photos'),
-        el('span', { class: 'muted small' }, `${media.length} in the shared folder`),
+        el('span', { class: 'muted small' },
+          state.filesTruncated
+            ? `Newest ${media.length} — the folder holds more`
+            : `${media.length} in the shared folder`),
       ),
       uploadButton(),
       media.length === 0
