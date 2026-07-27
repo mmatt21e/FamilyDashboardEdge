@@ -329,6 +329,19 @@ export async function listSharedMedia(folderId, { clientId, maxPerFolder = 1000 
   return { items, truncated };
 }
 
+/**
+ * A fresh thumbnailLink for one file.
+ *
+ * Drive's thumbnail links expire after a few hours. Re-asking for the link is
+ * a tiny metadata call, which is the right response to an expired tile - the
+ * old behaviour of downloading the original as a blob pulled multi-megabyte
+ * photos (or entire videos) just to draw a grid square.
+ */
+export async function refreshThumbnailLink(fileId, { clientId } = {}) {
+  const data = await driveFetch(`files/${fileId}?fields=thumbnailLink`, { clientId });
+  return data.thumbnailLink ?? null;
+}
+
 /** A URL the app can show an image from. Needs the token, so images are fetched as blobs. */
 export async function fetchFileBlobUrl(fileId, { clientId } = {}) {
   const token = await getAccessToken({ clientId });

@@ -10,7 +10,7 @@ import { el, spinner, emptyState, toast, formatDate } from '../ui.js';
 import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, subscribe, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
-import { listSharedMedia, fetchFileBlobUrl, uploadFile, forgetDriveAccess } from '../drive.js';
+import { listSharedMedia, fetchFileBlobUrl, refreshThumbnailLink, uploadFile, forgetDriveAccess } from '../drive.js';
 import { toPointerRecord, sortByTakenDesc, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
 
@@ -163,10 +163,13 @@ function driveProblem(diagnosis, onRetry) {
 }
 
 /**
- * Thumbnails come from Drive's own thumbnailLink where possible - it is already
- * resized, so a phone is not downloading full-size photos to draw a grid. When
- * it is missing the full file is fetched as a blob instead, which is slower but
- * always works.
+ * Thumbnails come from Drive's own thumbnailLink - it is already resized, so a
+ * phone is not downloading full-size photos to draw a grid.
+ *
+ * When the link is missing or expired, the first resort is asking Drive for a
+ * fresh link: a tiny metadata call. Only a photo that still has no link falls
+ * back to downloading the original as a blob. A video never does - "the
+ * original" is the entire video, downloaded into an <img> that cannot show it.
  */
 function thumbnail(record) {
   const img = el('img', {
@@ -174,12 +177,32 @@ function thumbnail(record) {
     alt: record.name ?? 'Photo',
   });
 
+  const lastResort = () => {
+    if (record.kind === KIND.VIDEO) {
+      img.replaceWith(el('div', { class: 'tile__missing' }, '🎬'));
+    } else {
+      void loadBlobInto(img, record);
+    }
+  };
+
+  const refresh = async () => {
+    try {
+      const fresh = await refreshThumbnailLink(record.driveId, { clientId: state.config.googleClientId });
+      if (fresh && fresh !== record.thumbnailUrl) {
+        record.thumbnailUrl = fresh; // so the viewer benefits from the refresh too
+        img.addEventListener('error', lastResort, { once: true });
+        img.src = fresh;
+        return;
+      }
+    } catch { /* fall through to the last resort */ }
+    lastResort();
+  };
+
   if (record.thumbnailUrl) {
+    img.addEventListener('error', () => { void refresh(); }, { once: true });
     img.src = record.thumbnailUrl;
-    // Drive thumbnail links expire; fall back rather than showing a broken image.
-    img.addEventListener('error', () => { void loadBlobInto(img, record); }, { once: true });
   } else {
-    void loadBlobInto(img, record);
+    void refresh();
   }
   return img;
 }
