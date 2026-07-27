@@ -12,7 +12,7 @@
 import { el, applyTheme, watchSystemTheme, toast, spinner } from './ui.js';
 import { loadConfig, isConfigured, saveConfig, readSetupLink } from './config.js';
 import { state, update, loadModuleSettings } from './store.js';
-import { isEnabled, navModules, getModule } from './modules.js';
+import { isEnabled, navModules, getModule, resolveState } from './modules.js';
 import * as fb from './firebase.js';
 import * as router from './router.js';
 import { diagnoseStartup, STARTUP_TIMEOUT_MS } from './diagnose.js';
@@ -158,6 +158,22 @@ async function continueBoot(config) {
     // with several Google accounts, silent renewal fails without this and the
     // family gets asked to pick an account over and over.
     setAccountHint(user.email);
+
+    // The fast path: this device has booted as this person before. The member
+    // stamp (a Firestore WRITE) and the module settings (a read) were two
+    // serial round trips standing between a returning user and their own home
+    // screen, and neither meaningfully changes between opens. Start from the
+    // cached copies now; the network confirms behind the running app.
+    const cached = recallBoot(user.uid);
+    if (cached?.member) {
+      update({ member: cached.member, modules: resolveState(cached.modules ?? null) });
+      void primeCatalog();
+      startApp();
+      void autoUpdate({ onUpdating: () => toast('Updating to the newest version…') });
+      void confirmBoot(user);
+      return;
+    }
+
     try {
       const member = await fb.upsertMember(user);
       update({ member });
@@ -177,6 +193,7 @@ async function continueBoot(config) {
     }
 
     await loadModuleSettings();
+    rememberBoot(user.uid, { member: state.member, modules: state.modules });
     // Photo tags, if any were imported. Not awaited - the dashboard should not
     // wait on a filter feature, and Photos loads them itself if this loses the
     // race.
@@ -187,6 +204,49 @@ async function continueBoot(config) {
     // hunting for a button - once per served build, so it can never loop.
     void autoUpdate({ onUpdating: () => toast('Updating to the newest version…') });
   });
+}
+
+/**
+ * The cached boot: who this device last booted as, and the module settings it
+ * saw. Together they let a returning user's home screen appear without
+ * waiting on Firestore at all.
+ */
+const BOOT_CACHE_KEY = 'fd.boot.v1';
+
+function recallBoot(uid) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BOOT_CACHE_KEY) ?? 'null');
+    return saved?.uid === uid ? saved : null;
+  } catch { return null; }
+}
+
+function rememberBoot(uid, { member, modules }) {
+  try {
+    localStorage.setItem(BOOT_CACHE_KEY, JSON.stringify({ uid, member, modules }));
+  } catch { /* private mode; the slow path still works */ }
+}
+
+/**
+ * The background half of the fast path: refresh the member stamp and module
+ * settings behind the running app. The only outcome that interrupts is
+ * permission-denied - membership actually revoked, the one case where the
+ * cached boot lied. A network failure changes nothing: the cached boot
+ * stands, which is exactly how an offline-capable app should behave.
+ */
+async function confirmBoot(user) {
+  try {
+    const member = await fb.upsertMember(user);
+    update({ member });
+    await loadModuleSettings();
+    rememberBoot(user.uid, { member, modules: state.modules });
+    // The nav redraws itself off this event if the family's toggles changed.
+    window.dispatchEvent(new CustomEvent('fd:modules-changed'));
+  } catch (error) {
+    if (error?.code === 'permission-denied') {
+      try { localStorage.removeItem(BOOT_CACHE_KEY); } catch { /* already gone */ }
+      screen(notAMemberView({ user, message: null, onJoined: () => location.reload() }));
+    }
+  }
 }
 
 /**
