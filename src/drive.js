@@ -279,18 +279,21 @@ export async function listSharedMedia(folderId, { clientId, maxPerFolder = 200 }
     (f) => f.mimeType === 'application/vnd.google-apps.folder',
   );
 
-  for (const folder of subfolders) {
-    try {
-      const page = await listFolder(folder.id, { clientId, pageSize: maxPerFolder });
-      for (const file of page.files) {
-        if (file.mimeType !== 'application/vnd.google-apps.folder') {
-          results.push({ file, folderName: folder.name });
-        }
+  // All subfolders in parallel: with one folder per phone, listing them one
+  // after another multiplied the scan time by the size of the family.
+  // allSettled, because one unreadable subfolder must not blank the grid.
+  const pages = await Promise.allSettled(
+    subfolders.map((folder) => listFolder(folder.id, { clientId, pageSize: maxPerFolder })),
+  );
+
+  pages.forEach((page, index) => {
+    if (page.status !== 'fulfilled') return;
+    for (const file of page.value.files) {
+      if (file.mimeType !== 'application/vnd.google-apps.folder') {
+        results.push({ file, folderName: subfolders[index].name });
       }
-    } catch {
-      // One unreadable subfolder must not blank the whole photo grid.
     }
-  }
+  });
 
   return results;
 }
