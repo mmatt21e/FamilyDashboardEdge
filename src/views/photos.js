@@ -11,7 +11,7 @@ import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, subscribe, filesAreStale } from '../store.js';
 import * as fb from '../firebase.js';
 import { listSharedMedia, fetchFileBlobUrl, refreshThumbnailLink, uploadFile, forgetDriveAccess } from '../drive.js';
-import { toPointerRecord, sortByTakenDesc, KIND } from '../files.js';
+import { toPointerRecord, sortByTakenDesc, formatSize, KIND } from '../files.js';
 import { dayKeysForToday, groupByYearsAgo, emptyMemoryPrompt } from '../memories.js';
 
 /**
@@ -224,34 +224,76 @@ function tile(record, onOpen) {
   return node;
 }
 
-/** Full-screen viewer. Kept simple: tap anywhere or press Escape to close. */
+/**
+ * Full-screen viewer. Tap anywhere or press Escape to close.
+ *
+ * A video gets a real <video> element - it used to get an <img> showing its
+ * thumbnail still, so videos could be browsed but never watched. Drive will
+ * only hand the bytes to a fetch carrying the token, so the whole file
+ * downloads before playback; fine for phone clips, and the thumbnail serves
+ * as the poster while it does.
+ */
 function openViewer(record) {
-  const img = el('img', { class: 'viewer__img', alt: record.name });
+  const isVideo = record.kind === KIND.VIDEO;
+  const media = isVideo
+    ? el('video', {
+        class: 'viewer__img', controls: true, playsinline: true,
+        poster: record.thumbnailUrl ?? null, 'aria-label': record.name,
+      })
+    : el('img', { class: 'viewer__img', alt: record.name });
+
+  const note = el('div', { class: 'muted small' });
   const overlay = el('div', { class: 'viewer', role: 'dialog', 'aria-modal': 'true' },
     el('button', { class: 'viewer__close', 'aria-label': 'Close' }, '✕'),
-    img,
+    media,
     el('div', { class: 'viewer__meta' },
       el('div', {}, record.name),
+      note,
       el('div', { class: 'muted small' },
         [record.takenAt ? formatDate(record.takenAt) : 'Date unknown', record.owner].filter(Boolean).join(' · ')),
     ),
   );
 
+  // Whatever came through fetch is held as an object URL, revoked on close so
+  // a browse does not accumulate every photo and video it opened in memory.
+  let objectUrl = null;
+
+  const showBlob = async () => {
+    objectUrl = await fetchFileBlobUrl(record.driveId, { clientId: state.config.googleClientId });
+    media.src = objectUrl;
+  };
+  const failed = () => media.replaceWith(el('p', { class: 'error-text' }, 'Could not open this file.'));
+
   void (async () => {
     try {
-      img.src = record.thumbnailUrl?.replace(/=s\d+/, '=s1600')
-        ?? await fetchFileBlobUrl(record.driveId, { clientId: state.config.googleClientId });
+      if (isVideo) {
+        note.textContent = `Loading video${record.size ? ` (${formatSize(record.size)})` : ''}…`;
+        await showBlob();
+        note.textContent = '';
+      } else {
+        const scaled = record.thumbnailUrl?.replace(/=s\d+/, '=s1600');
+        if (scaled) {
+          // An expired link falls back to the original, not to a broken image.
+          media.addEventListener('error', () => { showBlob().catch(failed); }, { once: true });
+          media.src = scaled;
+        } else {
+          await showBlob();
+        }
+      }
     } catch {
-      img.replaceWith(el('p', { class: 'error-text' }, 'Could not open this file.'));
+      failed();
     }
   })();
 
   const close = () => {
     overlay.remove();
     document.removeEventListener('keydown', onKey);
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
   };
   const onKey = (event) => { if (event.key === 'Escape') close(); };
 
+  // Tap anywhere closes an image; a video's controls have to stay tappable.
+  if (isVideo) media.addEventListener('click', (event) => event.stopPropagation());
   overlay.addEventListener('click', close);
   document.addEventListener('keydown', onKey);
   document.body.append(overlay);
