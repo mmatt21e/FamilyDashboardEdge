@@ -169,6 +169,36 @@ describe('feature walkthrough', () => {
   });
 });
 
+describe('public account information', () => {
+  test('publishes readable privacy and terms pages', async () => {
+    for (const pageName of ['privacy.html', 'terms.html']) {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      const page = await context.newPage();
+      const response = await page.goto(`${origin}/${pageName}`, { waitUntil: 'domcontentloaded' });
+      assert.equal(response.status(), 200, `${pageName} should be public`);
+      assert.match(await page.locator('h1').innerText(), /Privacy Policy|Terms of Use/);
+      assert.ok((await page.locator('main').innerText()).length > 500, `${pageName} should contain the full policy`);
+      await context.close();
+    }
+  });
+
+  test('sign-in explains that the account remains saved on this device', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await page.goto(`${origin}/privacy.html`, { waitUntil: 'domcontentloaded' });
+    const text = await page.evaluate(async () => {
+      const { signInView } = await import('./src/views/setup.js');
+      const view = signInView({ config: { familyName: 'Example Family' }, onSignIn: async () => {} });
+      document.body.replaceChildren(view);
+      return document.body.innerText;
+    });
+    assert.match(text, /stay signed in on this device/i);
+    assert.match(text, /Privacy Policy/i);
+    assert.match(text, /Terms/i);
+    await context.close();
+  });
+});
+
 describe('setup', () => {
   test('refuses an empty form and says what is missing', async () => {
     const { page, context } = await openApp();

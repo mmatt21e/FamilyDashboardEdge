@@ -27,6 +27,7 @@ export async function settingsView() {
       await notificationsCard(),
       modulesCard(),
       walkthroughCard(),
+      privacyCard(),
       photoTagsCard(),
       foldersCard(),
       await inviteCard(),
@@ -41,6 +42,17 @@ function walkthroughCard() {
     el('h2', {}, 'Feature walkthrough'),
     el('p', { class: 'muted small' }, 'A searchable guide to every available module and the quickest way to use it.'),
     el('a', { class: 'btn', href: './walkthrough.html' }, 'Open the walkthrough'));
+}
+
+function privacyCard() {
+  return el('section', { class: 'card' },
+    el('h2', {}, 'Privacy and access'),
+    el('p', { class: 'muted small' },
+      'Google keeps this device signed in. Family data stays behind the invitation and member list.'),
+    el('div', { class: 'row' },
+      el('a', { class: 'btn', href: './privacy.html' }, 'Privacy Policy'),
+      el('a', { class: 'btn', href: './terms.html' }, 'Terms')),
+  );
 }
 
 /**

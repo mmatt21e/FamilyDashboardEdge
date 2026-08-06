@@ -75,11 +75,34 @@ Settings → Pages → Source: **GitHub Actions**. Push to `main` and it deploys
 4. Project settings → Your apps → **Web app** (`</>`) → register it. Copy the `firebaseConfig` block it shows you.
 5. Firestore → **Rules** → paste in [`firestore.rules`](firestore.rules) → Publish.
 
-### 3. Allow your site to sign people in
+### 3. Allow any invited Google account to sign in
 
 Authentication → Settings → **Authorised domains** → add `yourname.github.io`.
 
 Without this, sign-in fails with a confusing error.
+
+Then open Google Cloud console → **Google Auth Platform → Audience**. Set the
+user type to **External** and publish the app to **In production**. While the
+publishing status is Testing, Google blocks every account that is not manually
+listed as a test user with `Error 403: access_denied`.
+
+Publishing the OAuth app makes basic Google sign-in available to any Google
+account. It does **not** make the dashboard or its records public: Firestore
+still requires a valid, unexpired family invitation before a new account can
+create a member record.
+
+In **Google Auth Platform → Branding**, set:
+
+- Home page: `https://yourname.github.io/FamilyDashboardEdge/`
+- Privacy policy: `https://yourname.github.io/FamilyDashboardEdge/privacy.html`
+- Terms: `https://yourname.github.io/FamilyDashboardEdge/terms.html`
+
+The app deliberately requests Google Drive and Gmail permission separately
+from basic sign-in. The full Drive scope is restricted and `gmail.send` is
+sensitive. A publicly distributed app must complete Google's applicable OAuth
+verification to remove all unverified-app warnings for those features. Basic
+dashboard sign-in remains separate, and users are not asked for Drive or Gmail
+permission merely to enter the dashboard.
 
 ### 4. Create the shared Drive folder
 
@@ -132,6 +155,10 @@ copying. A link-only invitation is never emailed at all.
 The link does three things when they open it: fills in all the settings, walks
 them through adding the app to their home screen, and lets them sign in with
 their own Google account. Nobody has to touch the Firebase console.
+
+Firebase uses local browser persistence, so the account remains signed in on
+that device until the person explicitly signs out or clears the browser/app
+data. Opening the dashboard again does not normally require another login.
 
 **Bind the invitation to an email address whenever you can.** With one set, only
 that Google account can use the invitation, so a forwarded link is worthless to

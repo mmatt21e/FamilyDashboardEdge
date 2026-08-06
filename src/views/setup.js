@@ -205,8 +205,16 @@ export function signInView({ config, onSignIn }) {
     el('div', { class: 'setup__logo' }, '🏡'),
     el('h1', {}, config?.familyName ?? 'Family Dashboard'),
     el('p', { class: 'muted' }, 'Sign in with your own Google account. There are no shared passwords.'),
+    el('p', { class: 'muted small' },
+      'You will stay signed in on this device until you sign out or clear this browser’s data.'),
     button,
     status,
+    el('p', { class: 'muted small' },
+      'Signing in confirms you agree to the ',
+      el('a', { href: './terms.html', target: '_blank', rel: 'noopener' }, 'Terms'),
+      ' and have read the ',
+      el('a', { href: './privacy.html', target: '_blank', rel: 'noopener' }, 'Privacy Policy'),
+      '.'),
   );
 }
 

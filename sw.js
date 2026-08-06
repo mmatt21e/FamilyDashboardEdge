@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v20';
+const CACHE_VERSION = 'v21';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -32,6 +32,8 @@ const SHELL = [
   './index.html',
   './manifest.webmanifest',
   './walkthrough.html',
+  './privacy.html',
+  './terms.html',
   './styles/app.css',
   './src/app.js',
   './src/catalog.js',
