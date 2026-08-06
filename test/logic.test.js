@@ -2093,6 +2093,18 @@ describe('version reporting', () => {
     assert.match(sw, /SKIP_WAITING/);
     assert.match(sw, /addEventListener\('message'/);
   });
+
+  test('a stale installed app can force its way onto the served build', async () => {
+    const { readFileSync } = await import('node:fs');
+    const update = readFileSync(new URL('../src/update.js', import.meta.url), 'utf8');
+    const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+
+    assert.match(update, /clearShellCaches/);
+    assert.match(update, /fd-update/);
+    assert.match(update, /RETRY_AFTER_MS/);
+    assert.match(sw, /freshShell/);
+    assert.match(sw, /network-first when a connection exists/);
+  });
 });
 
 describe('walking folders in parallel', () => {

@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v17';
+const CACHE_VERSION = 'v18';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -218,6 +218,26 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(() => caches.match('./index.html').then((r) => r ?? Response.error())),
+    );
+    return;
+  }
+
+  // Code and styles are network-first when a connection exists. The previous
+  // cache-first path returned yesterday's JavaScript on every refresh and only
+  // refreshed it behind the page, leaving the running app one release behind.
+  // Offline still falls back to the complete shell installed above.
+  const freshShell = /\.(?:js|css|html|webmanifest)$/.test(url.pathname);
+  if (freshShell) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request).then((cached) => cached ?? Response.error())),
     );
     return;
   }

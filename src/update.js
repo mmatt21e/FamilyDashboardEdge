@@ -53,24 +53,53 @@ export async function newerBuild() {
  * is coming and the caches are already fresh, so a plain reload lands on the
  * new build.
  */
-export async function applyUpdate() {
-  const registration = await navigator.serviceWorker?.getRegistration?.();
-  if (!registration) return location.reload();
+async function clearShellCaches() {
+  if (!globalThis.caches?.keys) return;
+  const keys = await caches.keys();
+  await Promise.all(keys
+    .filter((key) => key.startsWith('family-dashboard-') && key !== 'family-dashboard-sdk-v1')
+    .map((key) => caches.delete(key)));
+}
 
-  navigator.serviceWorker.addEventListener('controllerchange', () => location.reload(), { once: true });
+/**
+ * The query makes the navigation unique even when a browser insists on reusing
+ * an earlier response. The hash is preserved, so an update from Settings comes
+ * back to Settings rather than dumping someone on an unrelated screen.
+ */
+async function reloadIntoBuild(live) {
+  try { await clearShellCaches(); } catch { /* a network reload still helps */ }
+  const url = new URL(location.href);
+  url.searchParams.set('fd-update', live || String(Date.now()));
+  location.replace(url.href);
+}
+
+export async function applyUpdate(live = null) {
+  const registration = await navigator.serviceWorker?.getRegistration?.();
+  if (!registration) return reloadIntoBuild(live);
+
+  let reloadStarted = false;
+  const reload = () => {
+    if (reloadStarted) return;
+    reloadStarted = true;
+    void reloadIntoBuild(live);
+  };
+
+  navigator.serviceWorker.addEventListener('controllerchange', reload, { once: true });
   try {
     await registration.update();
   } catch {
     // Offline mid-check; the reload below will land back on this build.
   }
   registration.waiting?.postMessage({ type: 'SKIP_WAITING' });
-  setTimeout(() => location.reload(), 4000);
+  registration.installing?.postMessage?.({ type: 'SKIP_WAITING' });
+  setTimeout(reload, 4000);
 }
 
 // One attempt per served build, per session. If reloading did not get us onto
 // the newer build - a proxy pinning an old copy, say - trying again on the
 // next launch would reload forever.
 const TRIED_KEY = 'fd.update.tried';
+const RETRY_AFTER_MS = 15_000;
 
 /**
  * The launch-time check: if the server has moved on, reload once into it.
@@ -83,11 +112,12 @@ export async function autoUpdate({ onUpdating = null } = {}) {
     const live = await newerBuild();
     if (!live) return false;
 
-    if (sessionStorage.getItem(TRIED_KEY) === live) return false;
-    sessionStorage.setItem(TRIED_KEY, live);
+    const [triedSha, triedAt] = (sessionStorage.getItem(TRIED_KEY) ?? '').split(':');
+    if (triedSha === live && Date.now() - Number(triedAt || 0) < RETRY_AFTER_MS) return false;
+    sessionStorage.setItem(TRIED_KEY, `${live}:${Date.now()}`);
 
     onUpdating?.(live);
-    await applyUpdate();
+    await applyUpdate(live);
     return true;
   } catch {
     return false;

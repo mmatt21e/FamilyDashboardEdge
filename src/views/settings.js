@@ -76,7 +76,7 @@ function versionLine() {
 async function checkForUpdate() {
   const live = await newerBuild();
   if (!live) return false;
-  await applyUpdate();
+  await applyUpdate(live);
   return true;
 }
 
