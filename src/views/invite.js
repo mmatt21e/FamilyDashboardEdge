@@ -109,6 +109,7 @@ function inviteForm(onChanged) {
   const name = el('input', { class: 'input', type: 'text', placeholder: 'Their name (optional)' });
   const email = el('input', {
     class: 'input', type: 'email', placeholder: 'Their Google account email',
+    required: true, autocomplete: 'email',
     autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false',
   });
   const send = el('button', { class: 'btn btn--primary' }, 'Send the invitation');
@@ -118,17 +119,12 @@ function inviteForm(onChanged) {
     + 'permission to send email on your behalf.');
   const output = el('div');
 
-  // The button promises only what will actually happen: with an address the
-  // app sends the email itself; without one all it can do is hand over a link.
-  const relabel = () => {
-    send.textContent = email.value.trim() ? 'Send the invitation' : 'Create an invitation link';
-  };
-  email.addEventListener('input', relabel);
-  relabel();
-
   send.addEventListener('click', async () => {
     const address = normaliseEmail(email.value);
-    if (address && !looksLikeEmail(address)) {
+    if (!address) {
+      return toast('Enter the Google account email for this invitation', { error: true });
+    }
+    if (!looksLikeEmail(address)) {
       return toast('That does not look like an email address', { error: true });
     }
 
@@ -148,14 +144,8 @@ function inviteForm(onChanged) {
       const link = toInviteLink(toSetupLink(state.config), code);
       name.value = '';
       email.value = '';
-      relabel();
       await onChanged?.();
-
-      if (address) {
-        await emailFlow({ invitation, link, output, onChanged });
-      } else {
-        output.replaceChildren(sharePanel(invitation, link));
-      }
+      await emailFlow({ invitation, link, output, onChanged });
     } catch (error) {
       toast(error?.message ?? 'Could not create the invitation', { error: true });
     } finally {
@@ -168,9 +158,8 @@ function inviteForm(onChanged) {
     el('div', { class: 'field' },
       email,
       el('span', { class: 'field__hint' },
-        'With an email address the invitation only works for that Google account, so a '
-        + 'forwarded link is useless to anyone else. Leave it blank and anyone with the '
-        + 'link can join once.'),
+        'Required for safety. The invitation works only for this Google account, so a '
+        + 'forwarded link is useless to anyone else.'),
     ),
     el('div', { class: 'row' }, send),
     note,
@@ -265,27 +254,6 @@ function failedPanel({ invitation, link, message, error, retry }) {
   );
 }
 
-/** A link-only invitation: nothing to email, so hand over the message. */
-function sharePanel(invitation, link) {
-  const message = inviteMessage({
-    familyName: state.config?.familyName ?? 'our family',
-    fromName: state.member?.name?.split(' ')[0] ?? '',
-    link,
-  });
-
-  return el('div', { class: 'card card--inset' },
-    el('h3', {}, invitation.name ? `Invitation for ${invitation.name}` : 'Invitation link ready'),
-    el('p', { class: 'muted small' },
-      'No email address was given, so nothing was emailed — share this message with '
-      + 'whoever it is for:'),
-    el('textarea', { class: 'input input--code', rows: 5, readonly: true }, message),
-    el('div', { class: 'row' }, ...shareActions(invitation, link, message)),
-    el('p', { class: 'muted small' },
-      `Works for ${DEFAULT_EXPIRY_DAYS} days, once, for whoever opens it. `
-      + 'It stays valid until it is used, so you can send it again if it goes astray.'),
-  );
-}
-
 /**
  * The manual routes, kept as understudies: Gmail's compose screen filled in
  * (works in any browser signed in to Google, which is the whole family by
@@ -346,7 +314,7 @@ function inviteRow(invitation, onChanged) {
 
   return el('div', { class: 'invite-row' },
     el('div', { class: 'invite-row__text' },
-      el('div', {}, invitation.name || invitation.email || 'Anyone with the link'),
+      el('div', {}, invitation.name || invitation.email || 'Legacy invitation'),
       el('div', { class: 'muted small' },
         [invitation.email && invitation.name ? invitation.email : null,
           // "created" and "emailed" are different claims, and the difference

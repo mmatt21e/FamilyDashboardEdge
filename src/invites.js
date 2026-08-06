@@ -14,10 +14,10 @@
  * Two decisions worth stating, both of them about what happens when a link
  * escapes:
  *
- *  - **An invitation can be bound to an email address.** When it is, only that
- *    Google account can use it, and a forwarded link is worthless to anybody
- *    else. This is the default whenever an address is given, because the whole
- *    point of sending an invitation is that you know who you are sending it to.
+ *  - **Every invitation is bound to an email address.** Only that Google
+ *    account can use it, so a forwarded link is worthless to anybody else.
+ *    Link-only invitations used to be supported, but made possession of a
+ *    forwarded URL equivalent to permission to join the family.
  *
  *  - **An invitation is spent only once a membership actually exists.** An
  *    earlier design marked the token used as soon as someone opened the link,
@@ -82,18 +82,22 @@ export function buildInvitation({
   days = DEFAULT_EXPIRY_DAYS, now = Date.now(),
 } = {}) {
   const address = normaliseEmail(email);
-  if (address && !looksLikeEmail(address)) throw new Error('That does not look like an email address.');
+  if (!address) throw new Error('Enter the Google account email for this invitation.');
+  if (!looksLikeEmail(address)) throw new Error('That does not look like an email address.');
+
+  const lifetimeDays = Number(days);
+  if (!Number.isFinite(lifetimeDays) || lifetimeDays <= 0 || lifetimeDays > DEFAULT_EXPIRY_DAYS) {
+    throw new Error(`Invitations must expire within ${DEFAULT_EXPIRY_DAYS} days.`);
+  }
 
   return {
     code,
     name: String(name ?? '').trim(),
-    // Null rather than empty string: the rules check `email == null` to decide
-    // whether the invitation is bound, and "" is not null.
-    email: address || null,
+    email: address,
     invitedBy,
     invitedByName: String(invitedByName ?? '').trim(),
     createdAt: new Date(now).toISOString(),
-    expiresAt: now + days * 24 * 60 * 60 * 1000,
+    expiresAt: now + lifetimeDays * 24 * 60 * 60 * 1000,
     usedBy: null,
     usedAt: null,
     revoked: false,
@@ -119,7 +123,14 @@ export function checkInvitation(invitation, { email = null, now = Date.now() } =
   if (Number(invitation.expiresAt) <= now) {
     return { ok: false, reason: 'expired', message: 'That invitation has expired. Ask for a new one.' };
   }
-  if (invitation.email && normaliseEmail(email) !== invitation.email) {
+  if (!looksLikeEmail(invitation.email)) {
+    return {
+      ok: false,
+      reason: 'unsafe',
+      message: 'That invitation is not tied to a Google account and can no longer be used. Ask for a new one.',
+    };
+  }
+  if (normaliseEmail(email) !== invitation.email) {
     return {
       ok: false,
       reason: 'wrong-account',

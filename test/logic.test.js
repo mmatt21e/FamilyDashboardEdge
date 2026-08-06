@@ -1431,17 +1431,15 @@ describe('building an invitation', () => {
     assert.equal(invitation.email, 'someone@example.com');
   });
 
-  // The rules check `email == null` to decide whether an invitation is bound,
-  // and an empty string is not null.
-  test('no address is stored as null, never as an empty string', () => {
-    assert.equal(buildInvitation({ code: 'abc', email: '', now }).email, null);
-    assert.equal(buildInvitation({ code: 'abc', now }).email, null);
+  test('refuses to create an invitation without a Google account email', () => {
+    assert.throws(() => buildInvitation({ code: 'abc', email: '', now }), /Google account email/);
+    assert.throws(() => buildInvitation({ code: 'abc', now }), /Google account email/);
   });
 
   // Epoch millis rather than an ISO string, because a security rule cannot
   // parse a string into a timestamp to compare against request.time.
   test('the expiry is a number the security rules can compare', () => {
-    const invitation = buildInvitation({ code: 'abc', now });
+    const invitation = buildInvitation({ code: 'abc', email: 'her@example.com', now });
     assert.equal(typeof invitation.expiresAt, 'number');
     assert.equal(invitation.expiresAt, now + 14 * 86_400_000);
   });
@@ -1450,8 +1448,12 @@ describe('building an invitation', () => {
     assert.throws(() => buildInvitation({ code: 'abc', email: 'not an email' }));
   });
 
+  test('refuses an invitation lifetime longer than the safety limit', () => {
+    assert.throws(() => buildInvitation({ code: 'abc', email: 'her@example.com', days: 15, now }), /14 days/);
+  });
+
   test('starts unused and uncancelled', () => {
-    const invitation = buildInvitation({ code: 'abc', now });
+    const invitation = buildInvitation({ code: 'abc', email: 'her@example.com', now });
     assert.equal(invitation.usedBy, null);
     assert.equal(invitation.revoked, false);
   });
@@ -1477,9 +1479,11 @@ describe('checking an invitation', () => {
     assert.match(verdict.message, /her@example\.com/);
   });
 
-  test('an unbound invitation takes anyone', () => {
-    const open = buildInvitation({ code: 'abc', now });
-    assert.equal(checkInvitation(open, { email: 'anyone@example.com', now: now + 1000 }).ok, true);
+  test('rejects a legacy invitation that is not bound to an account', () => {
+    const open = { ...live, email: null };
+    const verdict = checkInvitation(open, { email: 'anyone@example.com', now: now + 1000 });
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.reason, 'unsafe');
   });
 
   test('refuses expired, used, cancelled and missing ones', () => {
@@ -1497,11 +1501,25 @@ describe('checking an invitation', () => {
   });
 });
 
+describe('invitation security rules', () => {
+  test('enforces email-bound invites and authenticated member identity', async () => {
+    const { readFileSync } = await import('node:fs');
+    const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+
+    assert.match(rules, /inviteData\(code\)\.email is string/);
+    assert.match(rules, /inviteData\(code\)\.email == request\.auth\.token\.email/);
+    assert.match(rules, /request\.resource\.data\.expiresAt <= request\.time\.toMillis\(\) \+ 1209600000/);
+    assert.match(rules, /request\.resource\.data\.email == request\.auth\.token\.email/);
+    assert.match(rules, /safeFamilyInviteUpdate\(\)/);
+    assert.doesNotMatch(rules, /inviteData\(code\)\.email == null/);
+  });
+});
+
 describe('invitation status', () => {
   const now = Date.UTC(2026, 0, 1);
 
   test('reads the way a person would say it', () => {
-    const invitation = buildInvitation({ code: 'abc', now });
+    const invitation = buildInvitation({ code: 'abc', email: 'her@example.com', now });
     assert.equal(describeInvitation(invitation, now).label, '14 days left');
     assert.equal(describeInvitation(invitation, now + 13.5 * 86_400_000).label, 'Expires today');
     assert.equal(describeInvitation({ ...invitation, usedBy: 'x' }, now).label, 'Joined');

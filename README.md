@@ -132,7 +132,7 @@ folder ID.
 
 ### 7. Invite everyone else
 
-Settings → **Invite someone**. Give their name and, ideally, the email address
+Settings → **Invite someone**. Give their name and the email address
 of the Google account they will sign in with, then **Send the invitation**.
 
 **The app emails it for them.** There is still no server and no mail account:
@@ -148,9 +148,9 @@ trusts. Two one-time things make that work:
   at the moment of sending, never bundled into the everyday Drive permission,
   and the token it produces is kept in memory only.
 
-If sending fails — or you leave the email blank — the screen falls back to the
-old ways: Gmail's compose window pre-filled, the phone's share sheet, or plain
-copying. A link-only invitation is never emailed at all.
+If sending fails, the screen falls back to the old ways: Gmail's compose window
+pre-filled, the phone's share sheet, or plain copying. The resulting link stays
+bound to the email entered even when it is delivered another way.
 
 The link does three things when they open it: fills in all the settings, walks
 them through adding the app to their home screen, and lets them sign in with
@@ -160,9 +160,9 @@ Firebase uses local browser persistence, so the account remains signed in on
 that device until the person explicitly signs out or clears the browser/app
 data. Opening the dashboard again does not normally require another login.
 
-**Bind the invitation to an email address whenever you can.** With one set, only
-that Google account can use the invitation, so a forwarded link is worthless to
-anyone else. Leave it blank and anyone holding the link can join, once.
+**Every invitation is bound to one Google email address.** Only that account can
+use it, so a forwarded link is worthless to anyone else. Older link-only
+invitations are rejected and must be replaced with a new email-bound invitation.
 
 Invitations last 14 days, are single-use, and can be cancelled from the same
 screen. Settings → **Set up everyone else** still copies a plain settings link

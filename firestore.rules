@@ -36,21 +36,55 @@ service cloud.firestore {
     //
     //   revoked / usedBy   - cancelled and spent invitations are dead
     //   expiresAt          - epoch millis, so it can be compared to request.time
-    //   email              - when set, only that Google account may use it, so a
-    //                        forwarded link is worthless to anybody else
+    //   email              - required; only that Google account may use it, so
+    //                        a forwarded link is worthless to anybody else
     function validInvite(code) {
-      return code is string
+      return signedIn()
+        && code is string
         && exists(/databases/$(database)/documents/invitations/$(code))
         && inviteData(code).revoked != true
         && inviteData(code).usedBy == null
         && inviteData(code).expiresAt is number
         && request.time.toMillis() < inviteData(code).expiresAt
-        && (inviteData(code).email == null
-            || inviteData(code).email == request.auth.token.email);
+        && inviteData(code).email is string
+        && inviteData(code).email == request.auth.token.email;
     }
 
     function inviteData(code) {
       return get(/databases/$(database)/documents/invitations/$(code)).data;
+    }
+
+    // Invitations are created by family members, but their security properties
+    // are still enforced here so a modified browser cannot create an open-ended
+    // or link-only invitation.
+    function safeNewInvite(code) {
+      return request.resource.data.keys().hasAll([
+          'code', 'name', 'email', 'invitedBy', 'invitedByName', 'createdAt',
+          'expiresAt', 'usedBy', 'usedAt', 'revoked'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'code', 'name', 'email', 'invitedBy', 'invitedByName', 'createdAt',
+          'expiresAt', 'usedBy', 'usedAt', 'revoked'
+        ])
+        && request.resource.data.code == code
+        && request.resource.data.email is string
+        && request.resource.data.email.size() >= 5
+        && request.resource.data.email.size() <= 254
+        && request.resource.data.invitedBy == request.auth.uid
+        && request.resource.data.expiresAt is number
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 1209600000
+        && request.resource.data.usedBy == null
+        && request.resource.data.usedAt == null
+        && request.resource.data.revoked == false;
+    }
+
+    function safeFamilyInviteUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['revoked', 'sentAt', 'sentBy'])
+        && (!changed.hasAny(['revoked']) || request.resource.data.revoked == true)
+        && (!changed.hasAny(['sentAt']) || request.resource.data.sentAt is string)
+        && (!changed.hasAny(['sentBy']) || request.resource.data.sentBy == request.auth.uid);
     }
 
     // --- members ------------------------------------------------------------
@@ -62,10 +96,16 @@ service cloud.firestore {
       // invitation whose code you name in the document you are creating.
       // Without one of those, a stranger who finds the app can sign in with
       // Google and write themselves onto the allowlist.
-      allow create: if signedIn() && request.auth.uid == uid
-        && (isFamily() || validInvite(request.resource.data.inviteCode));
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && validInvite(request.resource.data.inviteCode);
 
-      allow update: if isFamily() && request.auth.uid == uid;
+      allow update: if isFamily()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.email == request.auth.token.email;
 
       // Removing someone is a deliberate act done in the console, not from the
       // app, so nobody can lock the rest of the family out by accident.
@@ -74,22 +114,26 @@ service cloud.firestore {
 
     // --- invitations --------------------------------------------------------
     match /invitations/{code} {
-      // A single invitation can be read by anyone signed in, because knowing
-      // the code already implies having been sent it. Listing them is family
-      // only - otherwise any Google account could enumerate every outstanding
-      // invitation and the email addresses attached to them.
-      allow get: if isFamily() || signedIn();
+      // The intended recipient may read their own invitation. A signed-in
+      // stranger cannot use a leaked code to discover who it was sent to.
+      allow get: if isFamily()
+        || (signedIn()
+            && resource.data.email is string
+            && resource.data.email == request.auth.token.email);
       allow list: if isFamily();
 
-      allow create, delete: if isFamily();
+      allow create: if isFamily() && safeNewInvite(code);
+      allow delete: if isFamily();
 
       // Family members may cancel an invitation. The person joining may only
       // stamp it as used, and only if it is not used already - so a forwarded
       // copy cannot be burned by a bystander to lock out the genuine invitee.
-      allow update: if isFamily()
-        || (signedIn()
+      allow update: if (isFamily() && safeFamilyInviteUpdate())
+        || (isFamily()
+            && validInvite(code)
             && resource.data.usedBy == null
             && request.resource.data.usedBy == request.auth.uid
+            && request.resource.data.usedAt is string
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['usedBy', 'usedAt']));
     }
