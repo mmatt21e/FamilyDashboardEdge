@@ -22,7 +22,7 @@ export function resolveToolbarKeys(saved, moduleState) {
   // Keep the first run compact: the original core modules are shortcuts, and
   // everything else is one tap away in Features until this person pins it.
   if (!Array.isArray(saved)) {
-    return availableModules.filter((module) => module.defaultOn).map((module) => module.key);
+    return availableModules.filter((module) => module.toolbarDefault).map((module) => module.key);
   }
 
   const allowed = new Set(available);

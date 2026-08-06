@@ -26,6 +26,7 @@ export async function settingsView() {
       appearanceCard(),
       await notificationsCard(),
       modulesCard(),
+      walkthroughCard(),
       photoTagsCard(),
       foldersCard(),
       await inviteCard(),
@@ -33,6 +34,13 @@ export async function settingsView() {
       accountCard(),
     ),
   );
+}
+
+function walkthroughCard() {
+  return el('section', { class: 'card' },
+    el('h2', {}, 'Feature walkthrough'),
+    el('p', { class: 'muted small' }, 'A searchable guide to every available module and the quickest way to use it.'),
+    el('a', { class: 'btn', href: './walkthrough.html' }, 'Open the walkthrough'));
 }
 
 /**
@@ -149,10 +157,9 @@ function appearanceCard() {
 /**
  * The module list.
  *
- * Everything from the brief is listed, including features that are not built
- * yet - they show as "Coming soon" and cannot be switched on. Showing the full
- * map is more useful than hiding it, as long as it never pretends something
- * works when it does not.
+ * Everything from the brief is listed. The status handling remains so a future
+ * idea can be named honestly before it is built, but version 2.0 completes the
+ * original module catalog and unlocks it for the family.
  */
 function modulesCard() {
   return el('section', { class: 'card' },

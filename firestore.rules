@@ -238,8 +238,9 @@ service cloud.firestore {
       allow write: if isFamily() && request.resource.data.uid == request.auth.uid;
     }
 
-    // Generic list structure shared by shopping list, bucket list, watchlist,
-    // reading list, playlists and wish lists.
+    // Audited records for the additional modular features: discussions,
+    // coordination, documents, history, household tools, polls and fun lists.
+    // Every item includes a moduleKey; the UI only queries the active module.
     match /lists/{id} {
       allow read, write: if isFamily();
     }

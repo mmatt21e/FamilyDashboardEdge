@@ -6,7 +6,7 @@
  * and Memories does not re-download everything each time.
  */
 
-import { resolveState } from './modules.js';
+import { MODULE_CATALOG_VERSION, resolveState, unlockReadyModules } from './modules.js';
 import { saveConfig } from './config.js';
 import * as fb from './firebase.js';
 
@@ -46,10 +46,23 @@ export function update(patch) {
 export async function loadModuleSettings() {
   try {
     const doc = await fb.getDoc('modules', 'settings');
-    update({ modules: resolveState(doc?.enabled ?? null) });
+    const unlock = Number(doc?.catalogVersion ?? 0) < MODULE_CATALOG_VERSION;
+    const modules = unlock
+      ? unlockReadyModules(doc?.enabled ?? null)
+      : resolveState(doc?.enabled ?? null);
+    update({ modules });
     adoptFamilyName(doc?.familyName);
+    if (unlock) {
+      await fb.setDoc('modules', 'settings', {
+        enabled: modules,
+        catalogVersion: MODULE_CATALOG_VERSION,
+        unlockedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        updatedBy: state.user?.uid ?? null,
+      });
+    }
   } catch {
-    update({ modules: resolveState(null) });
+    update({ modules: unlockReadyModules(null) });
   }
 }
 
@@ -94,6 +107,7 @@ export async function setModuleEnabled(key, enabled) {
   update({ modules: resolveState(next) });
   await fb.setDoc('modules', 'settings', {
     enabled: state.modules,
+    catalogVersion: MODULE_CATALOG_VERSION,
     updatedAt: new Date().toISOString(),
     updatedBy: state.user?.uid ?? null,
   });

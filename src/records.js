@@ -20,6 +20,7 @@ export const RECORD_COLLECTIONS = Object.freeze({
   appointments: 'appointments',
   careLogs: 'care_logs',
   wellnessChecks: 'wellness_checks',
+  familyItems: 'list_items',
 });
 
 const ALLOWED_COLLECTIONS = new Set(Object.values(RECORD_COLLECTIONS));

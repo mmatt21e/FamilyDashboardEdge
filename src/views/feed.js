@@ -9,6 +9,7 @@
 import { el, spinner, emptyState, toast, relativeTime, formatDate } from '../ui.js';
 import { state } from '../store.js';
 import * as fb from '../firebase.js';
+import { RECORD_COLLECTIONS, removeRecord, saveRecord } from '../records.js';
 
 // ---------------------------------------------------------------------------
 // Message board
@@ -16,6 +17,9 @@ import * as fb from '../firebase.js';
 
 export async function feedView() {
   const list = el('div', { class: 'feed' }, spinner('Loading…'));
+  let messages = [];
+  let comments = [];
+  const commentDrafts = new Map();
   const textarea = el('textarea', {
     class: 'input', rows: 3, maxlength: 2000,
     placeholder: 'Share something with the family…',
@@ -51,23 +55,34 @@ export async function feedView() {
 
   // Newest 50. A family board does not need infinite scroll, and a bounded
   // query keeps the Firestore free tier comfortable.
+  const paint = () => {
+    list.replaceChildren(
+      messages.length === 0
+        ? emptyState('💬', 'Nothing yet', 'Be the first to say something.')
+        : el('div', {}, messages.map((message) => messageCard(
+            message,
+            comments.filter((comment) => comment.targetType === 'message' && comment.targetId === message.id),
+            commentDrafts,
+          ))),
+    );
+  };
+
   const unsubscribe = fb.watchDocs(
     'messages',
     { orderBy: ['createdAt', 'desc'], limit: 50 },
-    (messages) => {
-      list.replaceChildren(
-        messages.length === 0
-          ? emptyState('💬', 'Nothing yet', 'Be the first to say something.')
-          : el('div', {}, messages.map(messageCard)),
-      );
-    },
+    (next) => { messages = next; paint(); },
   );
-  container.addEventListener('fd:teardown', () => unsubscribe?.(), { once: true });
+  const stopComments = fb.watchDocs(
+    RECORD_COLLECTIONS.familyItems,
+    { where: [['moduleKey', '==', 'comments']], limit: 500 },
+    (next) => { comments = next; paint(); },
+  );
+  container.addEventListener('fd:teardown', () => { unsubscribe?.(); stopComments?.(); }, { once: true });
 
   return container;
 }
 
-function messageCard(message) {
+function messageCard(message, comments = [], drafts = new Map()) {
   const canDelete = message.authorId && message.authorId === state.user?.uid;
 
   const remove = canDelete && el('button', { class: 'link-btn', title: 'Delete' }, 'Delete');
@@ -89,6 +104,52 @@ function messageCard(message) {
       remove,
     ),
     el('p', { class: 'message__body' }, message.body ?? ''),
+    commentThread(message, comments, drafts),
+  );
+}
+
+function commentThread(message, comments, drafts) {
+  const input = el('textarea', {
+    class: 'input comment-thread__input', rows: 2, maxlength: 1200,
+    placeholder: 'Reply to this post…', 'aria-label': `Reply to ${message.authorName ?? 'this post'}`,
+  });
+  input.value = drafts.get(message.id) ?? '';
+  input.addEventListener('input', () => drafts.set(message.id, input.value));
+  const send = el('button', { class: 'btn btn--small', type: 'button' }, 'Reply');
+  send.addEventListener('click', async () => {
+    const body = input.value.trim();
+    if (!body) return;
+    send.disabled = true;
+    try {
+      await saveRecord(RECORD_COLLECTIONS.familyItems, null, {
+        moduleKey: 'comments', targetType: 'message', targetId: message.id,
+        subject: `Reply to ${message.authorName ?? 'a family post'}`, body,
+      });
+      input.value = '';
+      drafts.delete(message.id);
+      toast('Reply added');
+    } catch { toast('Could not add the reply', { error: true }); }
+    finally { send.disabled = false; }
+  });
+
+  return el('section', { class: 'comment-thread', 'aria-label': 'Comments' },
+    comments.length > 0 && el('div', { class: 'comment-thread__list' },
+      comments.map((comment) => el('div', { class: 'comment-thread__comment' },
+        el('div', { class: 'row row--between' },
+          el('strong', { class: 'small' }, comment.createdByName ?? 'Someone'),
+          el('span', { class: 'muted small' }, relativeTime(comment.createdAt)),
+        ),
+        el('p', {}, comment.body),
+        comment.createdBy === state.user?.uid && el('button', {
+          class: 'link-btn link-btn--danger', type: 'button', onClick: async () => {
+            if (!confirm('Delete this reply?')) return;
+            try { await removeRecord(RECORD_COLLECTIONS.familyItems, comment.id); }
+            catch { toast('Could not delete the reply', { error: true }); }
+          },
+        }, 'Delete'),
+      )),
+    ),
+    el('div', { class: 'comment-thread__form' }, input, send),
   );
 }
 

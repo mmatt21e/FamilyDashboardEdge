@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#2f6df0">
+  <title>Family Dashboard feature walkthrough</title>
+  <style>
+    :root{--bg:#f7f7f9;--card:#fff;--text:#16181d;--muted:#666d7a;--line:#e2e4ea;--accent:#2f6df0;--r:16px}
+    @media(prefers-color-scheme:dark){:root{--bg:#14161a;--card:#1c1f25;--text:#eceef2;--muted:#a8afbc;--line:#303540;--accent:#7ca6ff}}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+    header{background:linear-gradient(135deg,#245bc9,#6f4bd8);color:#fff;padding:max(1.5rem,env(safe-area-inset-top)) 1rem 2.5rem}
+    header>div,main{max-width:880px;margin:auto}h1{font-size:clamp(1.8rem,6vw,3rem);line-height:1.1;margin:.5rem 0}h2{margin:2rem 0 .6rem}p{margin:.35rem 0 1rem}.lead{max-width:680px;font-size:1.08rem;opacity:.92}
+    .back{color:#fff;text-decoration:none;font-weight:700}.controls{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(12px);padding:.8rem 0;border-bottom:1px solid var(--line)}
+    main{padding:0 1rem 4rem}.search{width:100%;min-height:48px;padding:.75rem 1rem;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--text);font:inherit}
+    .quick{display:flex;gap:.45rem;overflow:auto;padding:.6rem 0 0}.quick button{white-space:nowrap;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:.45rem .75rem;font:inherit;cursor:pointer}.quick button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .intro{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin:1rem 0}.tip,.feature{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:1rem}.tip strong{display:block;margin-bottom:.25rem}.group{scroll-margin-top:120px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:.75rem}
+    .feature{padding:0;overflow:hidden}.feature summary{display:flex;align-items:center;gap:.65rem;min-height:64px;padding:.85rem 1rem;cursor:pointer;font-weight:750;list-style:none}.feature summary::-webkit-details-marker{display:none}.feature summary:after{content:"+";margin-left:auto;color:var(--muted);font-size:1.3rem}.feature[open] summary:after{content:"−"}.icon{font-size:1.45rem}.steps{border-top:1px solid var(--line);padding:.85rem 1rem 1rem}.steps ol{margin:.2rem 0;padding-left:1.35rem}.steps li{margin:.35rem 0}.note{color:var(--muted);font-size:.88rem}.hidden{display:none!important}.footer{margin-top:2rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted)}
+    @media(max-width:520px){.grid{grid-template-columns:1fr}.controls{top:0}}
+  </style>
+</head>
+<body>
+  <header><div><a class="back" href="./#/">← Back to dashboard</a><h1>Feature walkthrough</h1><p class="lead">Everything the family dashboard can do, where to find it, and the shortest path to getting useful information into it.</p></div></header>
+  <main>
+    <div class="controls"><input id="search" class="search" type="search" placeholder="Search features or tasks…" aria-label="Search the walkthrough"><div id="quick" class="quick" aria-label="Feature groups"></div></div>
+    <section class="intro">
+      <div class="tip"><strong>▦ Open Features</strong>Tap <b>Features</b> in the bottom toolbar to see every available module, even when it has no toolbar shortcut.</div>
+      <div class="tip"><strong>＋ Add a shortcut</strong>Inside Features, tap <b>Add</b> beside anything you use often. Tap <b>On toolbar</b> to remove it later.</div>
+      <div class="tip"><strong>⚙️ Family availability</strong>Settings controls which modules the whole family can use. Toolbar shortcuts belong only to the signed-in person on that device.</div>
+      <div class="tip"><strong>🔒 Protect secrets</strong>Use safe references and private links. Never enter passwords, PINs, full account numbers, card numbers, or identity numbers.</div>
+    </section>
+    <div id="content"></div>
+    <p class="footer">Changes are shared with the family unless the feature says otherwise. Records show who added them, and most can be edited by any signed-in family member while only their creator can delete them.</p>
+  </main>
+  <script>
+    const groups = [
+      ['Daily life & connection',[
+        ['📷','Photos',['Open Photos to browse the shared Drive library.','Use the filters to narrow by person, year, event, or folder.','Open a photo to tag people, correct its date, or add an event.']],
+        ['🎬','Videos',['Open Videos for the family video library.','Choose a year, then a video.','Playback streams from Drive without downloading the whole file first.']],
+        ['🕰️','Memories',['Open Memories to see photographs from this date in earlier years.','Choose a memory to view it full size.','Correct dates in Photos if an item appears on the wrong day.']],
+        ['💬','Message board',['Write a short update and tap Post.','Recent family posts update live.','The person who posted can delete it.']],
+        ['🗨️','Comments',['Reply directly beneath a message-board post.','Use the Comments module for a standalone discussion or a linked photo conversation.','The author can delete their own reply.']],
+        ['🎙️','Voice & video notes',['Tap Add recorded note and choose or record an audio/video file.','Name the message and choose who it is for.','Saving uploads it into the family’s private shared Drive automatically.']],
+        ['👋','Daily check-in',['Choose the family member and today’s status.','Add a short note only when useful.','Use “Could use a call” or “Need help” to make the need clear.']],
+        ['✨','Highlights',['Choose who the highlight belongs to and the week.','Write one good thing worth remembering.','Review older highlights whenever the family needs a lift.']]
+      ]],
+      ['Calendar & coordination',[
+        ['📅','Calendar',['Add the event name and start date.','Use an end date for visits or trips spanning several days.','Upcoming plans appear in date order.']],
+        ['🎂','Birthdays',['Add the person or occasion, its date, and type.','Write the reminder plan or gift tradition.','Review upcoming dates before planning the month.']],
+        ['⏳','Countdown',['Name the visit or milestone and select its date.','The card calculates the remaining days automatically.','Keep location and preparation details in Notes.']],
+        ['🧳','Visit planner',['Add arrival and departure dates.','Choose the host and list the travellers.','Move the visit from Idea through Planning, Booked, and Complete.']],
+        ['🕓','Availability',['Choose a person, date, and time window.','Say whether the time is good for a call, visit, ride, or helping.','Add constraints in Notes.']],
+        ['🌍','Time zones',['Choose the family member and their time zone.','Add a city label.','The card shows their current local time.']]
+      ]],
+      ['Care & peace of mind',[
+        ['🩺','Medical info',['Choose who the information is about.','Record allergies, doctors, insurance references, or other important facts.','Keep passwords and full identity numbers out.']],
+        ['💊','Medications',['Add the medicine, dose, schedule, and person.','Use Taken when a dose is given to create a dated log.','Mark inactive medicines rather than losing their history.']],
+        ['📋','Appointments',['Add the person, time, provider, and place.','Record transport and preparation details.','Mark the appointment complete afterward.']],
+        ['📝','Care log',['Add a concise handoff note after a visit, call, symptom, or change.','State what happened and what follow-up remains.','The newest care information stays at the top.']],
+        ['❤️','Wellness check',['Choose a person and how they are doing today.','Missing check-ins remain visible.','Add a note when someone needs attention.']]
+      ]],
+      ['Documents & keepsakes',[
+        ['🗂️','Documents',['Add a safe document name and category.','Record where the protected original is stored.','Set a review or renewal date without copying secret numbers.']],
+        ['🏠','Home inventory',['Add the item, room, model, and approximate value.','Paste a private photo or receipt link.','Use the notes for condition or insurance context.']],
+        ['📌','Shared notes',['Create a clear title and category.','Write practical instructions or household information.','Do not store access passwords in plain text.']]
+      ]],
+      ['Family history',[
+        ['🍲','Recipe box',['Name and categorize the recipe.','Enter one ingredient per line.','Write the preparation steps and who the recipe came from.']],
+        ['📖','Story archive',['Name the story and its storyteller.','Write or transcribe the memory.','Optionally link a private recording or photograph.']],
+        ['🖼️','Old photos',['Link the private scanned photograph.','Add the people, place, and approximate date.','Write the story behind the image while someone remembers it.']],
+        ['🌳','Family tree',['Add one person-to-person relationship at a time.','Include birth and death dates when known.','Use notes for name changes or uncertain details.']]
+      ]],
+      ['Household',[
+        ['🛒','Shopping list',['Add the item, quantity, and aisle.','Assign it if one person is making the trip.','Mark it bought so everyone sees the update.']],
+        ['🍽️','Meal planning',['Choose the day and meal.','Name the dish and cook.','Add thawing, shopping, or preparation notes.']],
+        ['🧹','Chores',['Add the task, assignee, due date, and recurrence.','Mark it complete when finished.','Create the next occurrence when it comes due again.']],
+        ['⭐','Allowance',['Record what was earned and by whom.','Enter points, money, or both.','Move the entry from Earned to Approved to Paid.']],
+        ['🔧','Home upkeep',['Add the service or repair and due date.','Record the area, provider, cost, and recurrence.','Mark completed work while retaining its record.']]
+      ]],
+      ['Connection & fun',[
+        ['🎯','Bucket list',['Add an idea and who wants to do it.','Optionally choose a target date.','Mark it done and keep the memory in the list.']],
+        ['🍿','Watchlist',['Add the title, type, and platform.','Record who suggested it.','Mark it watched when the family finishes it.']],
+        ['📚','Reading',['Add the book and author.','Track who currently has it.','Move it through Want to read, Reading, Finished, or Loaned.']],
+        ['🎵','Playlists',['Name the playlist and music service.','Paste the shared link.','Record who maintains it and any theme notes.']],
+        ['🗳️','Polls',['Write the question and at least two choices, one per line.','Optionally set a closing date.','Each signed-in person taps one choice; totals update on the card.']],
+        ['🎁','Wish lists',['Add the item, recipient, price, and optional product link.','Choose its priority.','Mark it purchased without deleting the idea.']]
+      ]],
+      ['Money',[
+        ['🏦','Financial records',['Create only a safe account or paperwork reference.','Use a nickname and last four digits at most.','Record where the protected original is stored.']],
+        ['🧾','Bills & expenses',['Add the amount, category, due date, and frequency.','Use Due, Autopay, or Paid for status.','Mark paid items without deleting their history.']],
+        ['📊','Shared budget',['Choose a month and add planned amounts by category.','Recorded expenses are compared automatically.','Review remaining or over-budget totals.']]
+      ]]
+    ];
+    const content=document.querySelector('#content'),quick=document.querySelector('#quick'),search=document.querySelector('#search');
+    function render(filter='',group='All'){
+      content.replaceChildren();const q=filter.trim().toLowerCase();let shown=0;
+      for(const [name,items] of groups){if(group!=='All'&&group!==name)continue;const matches=items.filter(x=>!q||(`${x[1]} ${x[2].join(' ')}`).toLowerCase().includes(q));if(!matches.length)continue;
+        const section=document.createElement('section');section.className='group';section.id=name.replace(/\W+/g,'-').toLowerCase();const heading=document.createElement('h2');heading.textContent=name;const grid=document.createElement('div');grid.className='grid';
+        for(const [icon,title,steps] of matches){const d=document.createElement('details');d.className='feature';const s=document.createElement('summary');s.innerHTML=`<span class="icon">${icon}</span><span>${title}</span>`;const box=document.createElement('div');box.className='steps';const ol=document.createElement('ol');for(const step of steps){const li=document.createElement('li');li.textContent=step;ol.append(li)}box.append(ol);d.append(s,box);grid.append(d);shown++}section.append(heading,grid);content.append(section)}
+      if(!shown){const p=document.createElement('p');p.className='tip';p.textContent='No walkthrough matches that search.';content.append(p)}
+    }
+    for(const name of ['All',...groups.map(g=>g[0])]){const b=document.createElement('button');b.textContent=name;b.className=name==='All'?'active':'';b.onclick=()=>{quick.querySelectorAll('button').forEach(x=>x.classList.toggle('active',x===b));render(search.value,name)};quick.append(b)}
+    search.addEventListener('input',()=>{quick.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('active',i===0));render(search.value)});render();
+  </script>
+</body>
+</html>

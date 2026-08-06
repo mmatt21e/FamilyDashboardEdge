@@ -27,6 +27,7 @@ import { settingsView } from './views/settings.js';
 import { photosView, videosView, memoriesView } from './views/photos.js';
 import { feedView, calendarView } from './views/feed.js';
 import { financialRecordsView, expensesView, budgetView } from './views/money.js';
+import { MORE_FEATURE_KEYS, moreFeatureView } from './views/more.js';
 import {
   medicalInfoView, medicationsView, appointmentsView, careLogView, wellnessView,
 } from './views/care.js';
@@ -349,6 +350,9 @@ function registerRoutes() {
   router.route('/records', gated('records', financialRecordsView));
   router.route('/expenses', gated('expenses', expensesView));
   router.route('/budget', gated('budget', budgetView));
+  for (const key of MORE_FEATURE_KEYS) {
+    router.route(`/${key}`, gated(key, () => moreFeatureView(key)));
+  }
   router.route('/settings', settingsView);
   router.route('/setup-checklist', onboardingView);
   router.route('/photo-tags', importTagsView);
@@ -485,6 +489,7 @@ function renderFeaturePanel(nav) {
         );
       }),
     )),
+    el('a', { class: 'btn btn--block', href: './walkthrough.html' }, 'How to use every feature'),
     el('a', {
       class: 'btn btn--block', href: '#/settings', onClick: () => closeFeaturePanel(nav),
     }, 'Manage available features'),

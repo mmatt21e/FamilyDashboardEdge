@@ -12,7 +12,10 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { validateConfig, normaliseConfig, parseFirebaseSnippet } from '../src/config.js';
-import { defaultState, resolveState, isEnabled, navModules, MODULES, getModule } from '../src/modules.js';
+import {
+  defaultState, resolveState, isEnabled, navModules, MODULES, getModule,
+  MODULE_CATALOG_VERSION, unlockReadyModules,
+} from '../src/modules.js';
 import { dayKeyFor, dayKeysForToday, groupByYearsAgo, isLeapYear, describeYearsAgo } from '../src/memories.js';
 import { parseExifDate, originalDateFor, toPointerRecord, kindForMime, sortByTakenDesc, formatSize, dateFromFilename,
   ownerFromPath, isDateFolder, uploadPathFor, folderSafeName, personFolderPath } from '../src/files.js';
@@ -43,6 +46,7 @@ import {
 import {
   loadToolbarKeys, resolveToolbarKeys, saveToolbarKeys, setToolbarPinned, toolbarModules,
 } from '../src/toolbar.js';
+import { MORE_FEATURE_KEYS, featureConfig } from '../src/views/more.js';
 
 const validConfig = {
   familyName: 'The Smiths',
@@ -188,8 +192,8 @@ describe('module registry', () => {
     assert.equal(state.feed, true);
   });
 
-  test('unbuilt modules are off by default', () => {
-    assert.equal(defaultState().recipes, false);
+  test('the backlog has no remaining planned modules', () => {
+    assert.equal(MODULES.filter((module) => module.status === 'planned').length, 0);
   });
 
   // If a bad write could switch Settings off, the family would have no way back
@@ -201,10 +205,10 @@ describe('module registry', () => {
     assert.equal(state.files, true);
   });
 
-  test('a module that is only planned cannot be switched on', () => {
-    const state = resolveState({ recipes: true });
-    assert.equal(state.recipes, false);
-    assert.equal(isEnabled(state, 'recipes'), false);
+  test('the catalog migration unlocks every completed module', () => {
+    const migrated = unlockReadyModules(Object.fromEntries(MODULES.map((module) => [module.key, false])));
+    for (const module of MODULES) assert.equal(migrated[module.key], true, module.key);
+    assert.equal(MODULE_CATALOG_VERSION, 2);
   });
 
   test('unknown keys in saved settings are ignored', () => {
@@ -252,11 +256,35 @@ describe('module registry', () => {
       assert.equal(resolveState({ [key]: true })[key], true, `${key} should be switchable`);
     }
   });
+
+  test('every former backlog feature has a functional view configuration', () => {
+    const expected = MODULES
+      .filter((module) => !module.always)
+      .map((module) => module.key)
+      .filter((key) => !['photos', 'videos', 'memories', 'feed', 'calendar', 'medical', 'medications', 'appointments', 'carelog', 'wellness', 'records', 'expenses', 'budget'].includes(key));
+    assert.deepEqual([...MORE_FEATURE_KEYS].sort(), expected.sort());
+    for (const key of MORE_FEATURE_KEYS) {
+      const config = featureConfig(key);
+      assert.ok(config?.fields?.length, `${key} needs fields`);
+      assert.ok(config.cardTitle, `${key} needs a card title`);
+    }
+  });
+
+  test('recorded notes accept direct media capture and comments attach to posts', async () => {
+    const voice = featureConfig('voicenotes');
+    assert.ok(voice.fields.some((field) => field.type === 'file' && /audio/.test(field.accept)));
+    assert.equal(typeof voice.toRecord, 'function');
+
+    const { readFileSync } = await import('node:fs');
+    const feed = readFileSync(new URL('../src/views/feed.js', import.meta.url), 'utf8');
+    assert.match(feed, /targetType: 'message'/);
+    assert.match(feed, /moduleKey: 'comments'/);
+  });
 });
 
 describe('personal toolbar shortcuts', () => {
   const available = resolveState({
-    photos: true, calendar: true, medical: true, budget: true, recipes: true,
+    photos: true, calendar: true, medical: true, budget: true, recipes: false,
   });
 
   test('starts compact with core shortcuts while every feature remains available', () => {
@@ -265,7 +293,7 @@ describe('personal toolbar shortcuts', () => {
     assert.ok(keys.includes('calendar'));
     assert.ok(!keys.includes('medical'));
     assert.ok(!keys.includes('budget'));
-    assert.ok(!keys.includes('recipes'), 'planned features are never available');
+    assert.ok(!keys.includes('recipes'), 'family-disabled features are not available');
     assert.ok(navModules(available).some((module) => module.key === 'medical'));
   });
 

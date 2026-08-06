@@ -154,6 +154,21 @@ describe('app shell', () => {
   });
 });
 
+describe('feature walkthrough', () => {
+  test('loads every feature group and filters the guide', async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await page.goto(`${origin}/walkthrough.html`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.feature');
+
+    assert.ok(await page.locator('.feature').count() >= 40, 'the guide should cover the full module catalog');
+    await page.fill('#search', 'poll');
+    assert.equal(await page.locator('.feature').count(), 1);
+    assert.match(await page.locator('.feature').innerText(), /Polls/i);
+    await context.close();
+  });
+});
+
 describe('setup', () => {
   test('refuses an empty form and says what is missing', async () => {
     const { page, context } = await openApp();

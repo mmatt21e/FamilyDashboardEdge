@@ -25,6 +25,11 @@ export const GROUPS = [
   { key: 'money', title: 'Money' },
 ];
 
+// Incremented when a release turns planned modules into working features. The
+// store uses it once to unlock newly completed features even though older
+// settings documents necessarily saved those planned switches as false.
+export const MODULE_CATALOG_VERSION = 2;
+
 /**
  * `list` marks modules that are just a named list of things. They all share one
  * generic list/item structure rather than each getting its own collection, so
@@ -38,23 +43,23 @@ export const MODULES = [
   { key: 'onboarding', group: 'foundation', title: 'Setup checklist',  icon: '✅', always: true, status: 'ready', desc: 'Getting each phone installed and syncing photos.' },
 
   // --- priority modules -----------------------------------------------------
-  { key: 'photos',    group: 'daily', title: 'Photos',        icon: '📷', status: 'ready', defaultOn: true,  desc: 'Everyone\'s photos from the shared folder, newest first.' },
-  { key: 'videos',    group: 'daily', title: 'Videos',        icon: '🎬', status: 'ready', defaultOn: true,  desc: 'The family\'s videos, in their own library.' },
-  { key: 'memories',  group: 'daily', title: 'Memories',      icon: '🕰️', status: 'ready', defaultOn: true,  desc: 'On this day: what you were doing a year, four years, ten years ago.' },
-  { key: 'feed',      group: 'daily', title: 'Message board', icon: '💬', status: 'ready', defaultOn: true,  desc: 'Short updates and photos, together in one feed.' },
-  { key: 'calendar',  group: 'calendar', title: 'Calendar',   icon: '📅', status: 'ready', defaultOn: true,  desc: 'Visits, travel and when everyone is seeing each other.' },
+  { key: 'photos',    group: 'daily', title: 'Photos',        icon: '📷', status: 'ready', defaultOn: true, toolbarDefault: true, desc: 'Everyone\'s photos from the shared folder, newest first.' },
+  { key: 'videos',    group: 'daily', title: 'Videos',        icon: '🎬', status: 'ready', defaultOn: true, toolbarDefault: true, desc: 'The family\'s videos, in their own library.' },
+  { key: 'memories',  group: 'daily', title: 'Memories',      icon: '🕰️', status: 'ready', defaultOn: true, toolbarDefault: true, desc: 'On this day: what you were doing a year, four years, ten years ago.' },
+  { key: 'feed',      group: 'daily', title: 'Message board', icon: '💬', status: 'ready', defaultOn: true, toolbarDefault: true, desc: 'Short updates and photos, together in one feed.' },
+  { key: 'calendar',  group: 'calendar', title: 'Calendar',   icon: '📅', status: 'ready', defaultOn: true, toolbarDefault: true, desc: 'Visits, travel and when everyone is seeing each other.' },
 
   // --- additional modules ---------------------------------------------------
-  { key: 'comments',    group: 'daily', title: 'Comments',            icon: '🗨️', status: 'planned', desc: 'Replies on photos and posts.' },
-  { key: 'voicenotes',  group: 'daily', title: 'Voice & video notes', icon: '🎙️', status: 'planned', desc: 'Short recorded messages.' },
-  { key: 'checkin',     group: 'daily', title: 'Daily check-in',      icon: '👋', status: 'planned', desc: 'A quick "I am good today".' },
-  { key: 'gratitude',   group: 'daily', title: 'Highlights',          icon: '✨', status: 'planned', desc: 'A weekly good-thing from each person.' },
+  { key: 'comments',    group: 'daily', title: 'Comments',            icon: '🗨️', status: 'ready', defaultOn: true, desc: 'Replies and discussion threads for family posts and photos.' },
+  { key: 'voicenotes',  group: 'daily', title: 'Voice & video notes', icon: '🎙️', status: 'ready', defaultOn: true, desc: 'Short recorded messages shared through a private link.' },
+  { key: 'checkin',     group: 'daily', title: 'Daily check-in',      icon: '👋', status: 'ready', defaultOn: true, desc: 'A quick "I am good today".' },
+  { key: 'gratitude',   group: 'daily', title: 'Highlights',          icon: '✨', status: 'ready', defaultOn: true, desc: 'A weekly good thing from each person.' },
 
-  { key: 'birthdays',    group: 'calendar', title: 'Birthdays',        icon: '🎂', status: 'planned', desc: 'Birthdays and anniversaries with reminders.' },
-  { key: 'countdown',    group: 'calendar', title: 'Countdown',        icon: '⏳', status: 'planned', desc: 'Days until the next time everyone is together.' },
-  { key: 'visitplanner', group: 'calendar', title: 'Visit planner',    icon: '🧳', status: 'planned', desc: 'Who is hosting, who is travelling.' },
-  { key: 'availability', group: 'calendar', title: 'Availability',     icon: '🕓', status: 'planned', desc: 'Free times for calls and visits.' },
-  { key: 'timezones',    group: 'calendar', title: 'Time zones',       icon: '🌍', status: 'planned', desc: 'What time it is for everyone.' },
+  { key: 'birthdays',    group: 'calendar', title: 'Birthdays',        icon: '🎂', status: 'ready', defaultOn: true, desc: 'Birthdays and anniversaries with reminder plans.' },
+  { key: 'countdown',    group: 'calendar', title: 'Countdown',        icon: '⏳', status: 'ready', defaultOn: true, desc: 'Days until the next time everyone is together.' },
+  { key: 'visitplanner', group: 'calendar', title: 'Visit planner',    icon: '🧳', status: 'ready', defaultOn: true, desc: 'Who is hosting, who is travelling, and what is booked.' },
+  { key: 'availability', group: 'calendar', title: 'Availability',     icon: '🕓', status: 'ready', defaultOn: true, desc: 'Free times for calls, visits, rides, and helping.' },
+  { key: 'timezones',    group: 'calendar', title: 'Time zones',       icon: '🌍', status: 'ready', defaultOn: true, desc: 'The current local time for everyone.' },
 
   { key: 'medical',     group: 'care', title: 'Medical info',    icon: '🩺', status: 'ready', desc: 'Medications, doctors, allergies, insurance.' },
   { key: 'medications', group: 'care', title: 'Medications',     icon: '💊', status: 'ready', desc: 'Current medicines and a record of what was taken.' },
@@ -62,27 +67,27 @@ export const MODULES = [
   { key: 'carelog',     group: 'care', title: 'Care log',        icon: '📝', status: 'ready', desc: 'Shared notes between family members coordinating care.' },
   { key: 'wellness',    group: 'care', title: 'Wellness check',  icon: '❤️', status: 'ready', desc: 'A daily check with visible missing check-ins.' },
 
-  { key: 'vault',     group: 'documents', title: 'Documents',      icon: '🗂️', status: 'planned', desc: 'Wills, policies, property papers.' },
-  { key: 'inventory', group: 'documents', title: 'Home inventory', icon: '🏠', status: 'planned', desc: 'Photos of what is in the house, for insurance.' },
-  { key: 'notes',     group: 'documents', title: 'Shared notes',   icon: '📌', status: 'planned', desc: 'Wifi password, bin day, house instructions.' },
+  { key: 'vault',     group: 'documents', title: 'Documents',      icon: '🗂️', status: 'ready', defaultOn: true, desc: 'Safe references to wills, policies, and property papers.' },
+  { key: 'inventory', group: 'documents', title: 'Home inventory', icon: '🏠', status: 'ready', defaultOn: true, desc: 'Household items, photos, receipts, and insurance details.' },
+  { key: 'notes',     group: 'documents', title: 'Shared notes',   icon: '📌', status: 'ready', defaultOn: true, desc: 'Bin day, house instructions, and other practical notes.' },
 
-  { key: 'recipes',   group: 'history', title: 'Recipe box',    icon: '🍲', status: 'planned', desc: 'Family recipes.' },
-  { key: 'stories',   group: 'history', title: 'Story archive',  icon: '📖', status: 'planned', desc: 'Recorded memories and family history.' },
-  { key: 'oldphotos', group: 'history', title: 'Old photos',     icon: '🖼️', status: 'planned', desc: 'Scanned photographs from before phones.' },
-  { key: 'tree',      group: 'history', title: 'Family tree',    icon: '🌳', status: 'planned', desc: 'Who is related to whom.' },
+  { key: 'recipes',   group: 'history', title: 'Recipe box',    icon: '🍲', status: 'ready', defaultOn: true, desc: 'Family recipes with ingredients and instructions.' },
+  { key: 'stories',   group: 'history', title: 'Story archive',  icon: '📖', status: 'ready', defaultOn: true, desc: 'Recorded memories and written family history.' },
+  { key: 'oldphotos', group: 'history', title: 'Old photos',     icon: '🖼️', status: 'ready', defaultOn: true, desc: 'Scanned photographs with names, dates, and stories.' },
+  { key: 'tree',      group: 'history', title: 'Family tree',    icon: '🌳', status: 'ready', defaultOn: true, desc: 'Who is related to whom.' },
 
-  { key: 'grocery',     group: 'household', title: 'Shopping list', icon: '🛒', status: 'planned', list: true, desc: 'A shared shopping list.' },
-  { key: 'meals',       group: 'household', title: 'Meal planning', icon: '🍽️', status: 'planned', desc: 'What everyone is eating this week.' },
-  { key: 'chores',      group: 'household', title: 'Chores',        icon: '🧹', status: 'planned', desc: 'Who is doing what.' },
-  { key: 'allowance',   group: 'household', title: 'Allowance',     icon: '⭐', status: 'planned', desc: 'Points and pocket money for chores.' },
-  { key: 'maintenance', group: 'household', title: 'Home upkeep',   icon: '🔧', status: 'planned', desc: 'Boiler service, gutters, that sort of thing.' },
+  { key: 'grocery',     group: 'household', title: 'Shopping list', icon: '🛒', status: 'ready', defaultOn: true, list: true, desc: 'A shared shopping list.' },
+  { key: 'meals',       group: 'household', title: 'Meal planning', icon: '🍽️', status: 'ready', defaultOn: true, desc: 'What everyone is eating this week.' },
+  { key: 'chores',      group: 'household', title: 'Chores',        icon: '🧹', status: 'ready', defaultOn: true, desc: 'Who is doing what and whether it is complete.' },
+  { key: 'allowance',   group: 'household', title: 'Allowance',     icon: '⭐', status: 'ready', defaultOn: true, desc: 'Points and pocket money earned from responsibilities.' },
+  { key: 'maintenance', group: 'household', title: 'Home upkeep',   icon: '🔧', status: 'ready', defaultOn: true, desc: 'Services, repairs, and recurring home maintenance.' },
 
-  { key: 'bucketlist', group: 'fun', title: 'Bucket list', icon: '🎯', status: 'planned', list: true, desc: 'Things to do together one day.' },
-  { key: 'watchlist',  group: 'fun', title: 'Watchlist',   icon: '🍿', status: 'planned', list: true, desc: 'Films and shows to watch.' },
-  { key: 'reading',    group: 'fun', title: 'Reading',     icon: '📚', status: 'planned', list: true, desc: 'Books being passed around.' },
-  { key: 'playlists',  group: 'fun', title: 'Playlists',   icon: '🎵', status: 'planned', list: true, desc: 'Music everyone adds to.' },
-  { key: 'polls',      group: 'fun', title: 'Polls',       icon: '🗳️', status: 'planned', desc: 'Settling family decisions.' },
-  { key: 'wishlists',  group: 'fun', title: 'Wish lists',  icon: '🎁', status: 'planned', list: true, desc: 'Gift ideas for each person.' },
+  { key: 'bucketlist', group: 'fun', title: 'Bucket list', icon: '🎯', status: 'ready', defaultOn: true, list: true, desc: 'Things to do together one day.' },
+  { key: 'watchlist',  group: 'fun', title: 'Watchlist',   icon: '🍿', status: 'ready', defaultOn: true, list: true, desc: 'Films and shows to watch.' },
+  { key: 'reading',    group: 'fun', title: 'Reading',     icon: '📚', status: 'ready', defaultOn: true, list: true, desc: 'Books being read and passed around.' },
+  { key: 'playlists',  group: 'fun', title: 'Playlists',   icon: '🎵', status: 'ready', defaultOn: true, list: true, desc: 'Music links everyone can enjoy.' },
+  { key: 'polls',      group: 'fun', title: 'Polls',       icon: '🗳️', status: 'ready', defaultOn: true, desc: 'One-person-one-vote family decisions.' },
+  { key: 'wishlists',  group: 'fun', title: 'Wish lists',  icon: '🎁', status: 'ready', defaultOn: true, list: true, desc: 'Gift ideas for each person.' },
 
   { key: 'records',  group: 'money', title: 'Financial records', icon: '🏦', status: 'ready', desc: 'A safe index of accounts and important paperwork.' },
   { key: 'expenses', group: 'money', title: 'Bills & expenses',  icon: '🧾', status: 'ready', desc: 'Upcoming bills, shared costs and what has been paid.' },
@@ -132,6 +137,13 @@ export function resolveState(saved) {
     if (m.always) state[m.key] = true;
     if (m.status !== 'ready') state[m.key] = false;
   }
+  return state;
+}
+
+/** Enables every completed feature for a catalog-unlock release. */
+export function unlockReadyModules(saved) {
+  const state = resolveState(saved);
+  for (const module of readyModules()) state[module.key] = true;
   return state;
 }
 

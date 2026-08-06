@@ -28,12 +28,14 @@ and it never handles anyone else's data.
 | **Care** — medical info, medications and dose log, appointments, care log, wellness checks | Working |
 | **Money** — safe financial references, bills and expenses, monthly shared budget | Working |
 | **Features panel** — open every available module and choose personal toolbar shortcuts | Working |
+| **All planned modules** — coordination, documents, history, household, and family-fun tools | Working |
+| Searchable HTML walkthrough for every module | Working |
 | Settings with on/off switches for every feature | Working |
 | Per-person notification preferences | Preferences work; **sending needs a Cloud Function** |
 | Dark mode | Working |
 | Version number and one-tap update check in Settings | Working |
 | Setup checklist with PhotoSync walkthrough | Working |
-| The other ~27 features from the plan | Listed in Settings as "Coming soon" |
+| Remaining features from the original plan | All implemented and unlocked in version 2.0 |
 
 Photos and videos are moved off phones by **PhotoSync**, not by this app — a web
 app cannot do that on iOS. The dashboard reads the folder PhotoSync uploads to.
@@ -327,9 +329,9 @@ test/                 logic tests + a browser smoke test
 2. Write a view in `src/views/`.
 3. Register a route in `src/app.js`.
 
-It then appears in Settings with a switch and in the navigation. List-type
-features (shopping, bucket list, watchlist, wish lists) share one generic
-list/item structure rather than each getting their own.
+It then appears in Settings with a switch and in the Features panel. Each person
+can independently add it to their own toolbar. Record-style modules share the
+audited `list_items` structure rather than duplicating a new data layer.
 
 ---
 
@@ -342,21 +344,17 @@ Being explicit, so nothing here is a surprise:
   static site has no server — that needs a Cloud Function on your own Firebase
   project, triggered by new documents in `messages` or `calendar_events`. The
   Settings screen says so rather than showing a switch that does nothing.
-- **The other ~27 features.** Listed in Settings as "Coming soon" and not
-  switchable. The registry is ready for them.
-- **The generic list structure.** `lists` / `list_items` are in the security
-  rules and the design is settled, but nothing uses them until the first
-  list-type feature (shopping list) is built.
 - **No explicit export button.** Not needed for the inheritance goal: the shared
   Drive folder already *is* the plain readable archive — photos as photos, PDFs
   as PDFs, openable without this app ever existing.
 
 ## Care and money modules
 
-The eight care and money modules are optional and start switched off. Turn on
-the ones the family wants in **Settings**; each enabled module appears on Home
-and in the bottom navigation. Existing installations must also publish the
-updated [`firestore.rules`](firestore.rules) before these screens can save data.
+Version 2.0 unlocks the full catalog, including all care and money modules, for
+existing and new families. Settings can still make any optional feature
+unavailable to the family, and each person chooses their own toolbar shortcuts
+from the Features panel. Existing installations must publish the current
+[`firestore.rules`](firestore.rules) before care and money screens can save data.
 
 - Medical info is a family reference, not a clinical or emergency system. It
   stores allergies, conditions, care-team contacts, insurance references and

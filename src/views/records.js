@@ -22,6 +22,11 @@ function inputFor(field, context) {
     });
   } else if (field.type === 'checkbox') {
     input = el('input', { name: field.key, type: 'checkbox' });
+  } else if (field.type === 'file') {
+    input = el('input', {
+      class: 'input', name: field.key, type: 'file',
+      accept: field.accept, capture: field.capture,
+    });
   } else {
     input = el('input', {
       class: 'input', name: field.key, type: field.type ?? 'text',
@@ -45,7 +50,9 @@ function readForm(form, fields) {
   const values = {};
   for (const field of fields) {
     const input = form.elements.namedItem(field.key);
-    values[field.key] = field.type === 'checkbox' ? Boolean(input?.checked) : String(input?.value ?? '').trim();
+    if (field.type === 'checkbox') values[field.key] = Boolean(input?.checked);
+    else if (field.type === 'file') values[field.key] = input?.files?.[0] ?? null;
+    else values[field.key] = String(input?.value ?? '').trim();
   }
   return values;
 }
@@ -58,6 +65,7 @@ function fillForm(form, fields, record = null) {
       ? (field.fromRecord ? field.fromRecord(record) : record[field.key])
       : (typeof field.defaultValue === 'function' ? field.defaultValue() : field.defaultValue);
     if (field.type === 'checkbox') input.checked = Boolean(raw);
+    else if (field.type === 'file') input.value = '';
     else input.value = raw ?? '';
   }
 }
@@ -100,7 +108,7 @@ export async function collectionView(config) {
     event.preventDefault();
     if (!form.reportValidity()) return;
     const values = readForm(form, config.fields);
-    const outcome = config.toRecord(values, editing, context);
+    const outcome = await config.toRecord(values, editing, context);
     if (outcome?.error) return toast(outcome.error, { error: true });
 
     submit.disabled = true;
