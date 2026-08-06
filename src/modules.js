@@ -56,11 +56,11 @@ export const MODULES = [
   { key: 'availability', group: 'calendar', title: 'Availability',     icon: '🕓', status: 'planned', desc: 'Free times for calls and visits.' },
   { key: 'timezones',    group: 'calendar', title: 'Time zones',       icon: '🌍', status: 'planned', desc: 'What time it is for everyone.' },
 
-  { key: 'medical',     group: 'care', title: 'Medical info',    icon: '🩺', status: 'planned', desc: 'Medications, doctors, allergies, insurance.' },
-  { key: 'medications', group: 'care', title: 'Medications',     icon: '💊', status: 'planned', desc: 'Reminders and a record of what was taken.' },
-  { key: 'appointments',group: 'care', title: 'Appointments',    icon: '📋', status: 'planned', desc: 'Upcoming appointments and reminders.' },
-  { key: 'carelog',     group: 'care', title: 'Care log',        icon: '📝', status: 'planned', desc: 'Shared notes between siblings sharing care.' },
-  { key: 'wellness',    group: 'care', title: 'Wellness check',  icon: '❤️', status: 'planned', desc: 'A daily check with an alert if it is missed.' },
+  { key: 'medical',     group: 'care', title: 'Medical info',    icon: '🩺', status: 'ready', desc: 'Medications, doctors, allergies, insurance.' },
+  { key: 'medications', group: 'care', title: 'Medications',     icon: '💊', status: 'ready', desc: 'Current medicines and a record of what was taken.' },
+  { key: 'appointments',group: 'care', title: 'Appointments',    icon: '📋', status: 'ready', desc: 'Upcoming appointments, preparation and transport.' },
+  { key: 'carelog',     group: 'care', title: 'Care log',        icon: '📝', status: 'ready', desc: 'Shared notes between family members coordinating care.' },
+  { key: 'wellness',    group: 'care', title: 'Wellness check',  icon: '❤️', status: 'ready', desc: 'A daily check with visible missing check-ins.' },
 
   { key: 'vault',     group: 'documents', title: 'Documents',      icon: '🗂️', status: 'planned', desc: 'Wills, policies, property papers.' },
   { key: 'inventory', group: 'documents', title: 'Home inventory', icon: '🏠', status: 'planned', desc: 'Photos of what is in the house, for insurance.' },
@@ -84,9 +84,9 @@ export const MODULES = [
   { key: 'polls',      group: 'fun', title: 'Polls',       icon: '🗳️', status: 'planned', desc: 'Settling family decisions.' },
   { key: 'wishlists',  group: 'fun', title: 'Wish lists',  icon: '🎁', status: 'planned', list: true, desc: 'Gift ideas for each person.' },
 
-  { key: 'records',  group: 'money', title: 'Financial records', icon: '🏦', status: 'planned', desc: 'Statements and account paperwork.' },
-  { key: 'expenses', group: 'money', title: 'Bills & expenses',  icon: '🧾', status: 'planned', desc: 'What is owed and what is paid.' },
-  { key: 'budget',   group: 'money', title: 'Shared budget',     icon: '📊', status: 'planned', desc: 'Group costs for trips and gifts.' },
+  { key: 'records',  group: 'money', title: 'Financial records', icon: '🏦', status: 'ready', desc: 'A safe index of accounts and important paperwork.' },
+  { key: 'expenses', group: 'money', title: 'Bills & expenses',  icon: '🧾', status: 'ready', desc: 'Upcoming bills, shared costs and what has been paid.' },
+  { key: 'budget',   group: 'money', title: 'Shared budget',     icon: '📊', status: 'ready', desc: 'Monthly plans compared with recorded expenses.' },
 ];
 
 const BY_KEY = new Map(MODULES.map((m) => [m.key, m]));

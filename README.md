@@ -25,12 +25,14 @@ and it never handles anyone else's data.
 | **Memories** — on this day, a year / four years / ten years ago | Working |
 | **Calendar** — visits, trips, when everyone is together | Working |
 | **Message board** — short updates and photos | Working |
+| **Care** — medical info, medications and dose log, appointments, care log, wellness checks | Working |
+| **Money** — safe financial references, bills and expenses, monthly shared budget | Working |
 | Settings with on/off switches for every feature | Working |
 | Per-person notification preferences | Preferences work; **sending needs a Cloud Function** |
 | Dark mode | Working |
 | Version number and one-tap update check in Settings | Working |
 | Setup checklist with PhotoSync walkthrough | Working |
-| The other ~35 features from the plan | Listed in Settings as "Coming soon" |
+| The other ~27 features from the plan | Listed in Settings as "Coming soon" |
 
 Photos and videos are moved off phones by **PhotoSync**, not by this app — a web
 app cannot do that on iOS. The dashboard reads the folder PhotoSync uploads to.
@@ -310,6 +312,7 @@ src/
   catalog-store.js    where those tags live in Firestore
   photo-edits.js      corrections made by hand, which an import never undoes
   photo-filter.js     the photo filter bar's logic
+  records.js          shared care/money data, audit fields and budget calculations
   version.js          which build this is — stamped at deploy
   firebase.js         sign-in and data
   drive.js            the shared folder
@@ -338,7 +341,7 @@ Being explicit, so nothing here is a surprise:
   static site has no server — that needs a Cloud Function on your own Firebase
   project, triggered by new documents in `messages` or `calendar_events`. The
   Settings screen says so rather than showing a switch that does nothing.
-- **The other ~35 features.** Listed in Settings as "Coming soon" and not
+- **The other ~27 features.** Listed in Settings as "Coming soon" and not
   switchable. The registry is ready for them.
 - **The generic list structure.** `lists` / `list_items` are in the security
   rules and the design is settled, but nothing uses them until the first
@@ -346,6 +349,27 @@ Being explicit, so nothing here is a surprise:
 - **No explicit export button.** Not needed for the inheritance goal: the shared
   Drive folder already *is* the plain readable archive — photos as photos, PDFs
   as PDFs, openable without this app ever existing.
+
+## Care and money modules
+
+The eight care and money modules are optional and start switched off. Turn on
+the ones the family wants in **Settings**; each enabled module appears on Home
+and in the bottom navigation. Existing installations must also publish the
+updated [`firestore.rules`](firestore.rules) before these screens can save data.
+
+- Medical info is a family reference, not a clinical or emergency system. It
+  stores allergies, conditions, care-team contacts, insurance references and
+  care preferences. Verify instructions with a clinician and call emergency
+  services for urgent help.
+- Medications keeps the current list and a simple dose log. Appointments covers
+  preparation, location, transport and completion. Care log is a chronological
+  handoff between family members. Wellness check shows who has and has not
+  checked in today; sending an alert for a missed check still requires the same
+  Cloud Function as other push notifications.
+- Financial records is intentionally a safe index rather than a password vault:
+  use nicknames and last-four references only. Bills & expenses tracks dates,
+  status and recurring costs. Shared budget compares monthly category plans with
+  the expenses recorded for that month.
 
 ## If it hangs on "Starting…"
 

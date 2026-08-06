@@ -124,7 +124,8 @@ export function isStandalone() {
 // Firestore
 // ---------------------------------------------------------------------------
 // One family, so paths are flat: /members, /modules, /files, /messages,
-// /calendar_events, /lists, /list_items, /photo_catalog. No tenant id anywhere -
+// /calendar_events, /lists, /list_items, /photo_catalog, plus the explicitly
+// named care and money collections in records.js. No tenant id anywhere -
 // this app is deliberately single-family and adding one would be dead weight.
 
 export async function getDoc(path, id) {

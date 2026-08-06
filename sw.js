@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v16';
+const CACHE_VERSION = 'v17';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -50,6 +50,7 @@ const SHELL = [
   './src/notifications.js',
   './src/photo-edits.js',
   './src/photo-filter.js',
+  './src/records.js',
   './src/router.js',
   './src/store.js',
   './src/thumbs.js',
@@ -65,6 +66,9 @@ const SHELL = [
   './src/views/notifications-card.js',
   './src/views/onboarding.js',
   './src/views/photos.js',
+  './src/views/records.js',
+  './src/views/care.js',
+  './src/views/money.js',
   './src/views/settings.js',
   './src/views/setup.js',
   './assets/icon.svg',

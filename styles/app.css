@@ -262,6 +262,71 @@ a { color: var(--accent); }
 .event__when { flex: none; min-width: 5.5rem; color: var(--accent); font-size: .85rem; }
 .event__title { font-weight: 600; }
 
+/* --- care and money records --------------------------------------------- */
+
+.record-notice {
+  border-left: 4px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.record-notice--care { border-left-color: var(--ok); }
+.record-notice p:last-child { margin-bottom: 0; }
+
+.record-editor[open] > summary { margin-bottom: 1rem; }
+.record-form .row > .field { min-width: 0; }
+.record-check {
+  display: flex; align-items: center; gap: .6rem;
+  min-height: 44px; margin-bottom: 1rem; font-weight: 600;
+}
+.record-check input { width: 20px; height: 20px; accent-color: var(--accent); }
+
+.record-list { display: grid; gap: .75rem; }
+.record-list .card { margin-bottom: 0; }
+.record-card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
+.record-card__head h2 { margin-bottom: 0; }
+.record-card__eyebrow {
+  color: var(--muted); text-transform: uppercase; letter-spacing: .04em;
+  font-size: .7rem; font-weight: 700; margin-bottom: .15rem;
+}
+.record-card__body { white-space: pre-wrap; overflow-wrap: anywhere; margin: .65rem 0 0; }
+.record-meta { display: flex; flex-wrap: wrap; gap: .3rem .75rem; color: var(--muted); font-size: .85rem; margin-top: .4rem; }
+.record-meta span:not(:last-child)::after { content: " ·"; opacity: .45; margin-left: .75rem; }
+.record-actions { display: flex; align-items: center; justify-content: flex-end; gap: .25rem; margin-top: .75rem; border-top: 1px solid var(--border); padding-top: .5rem; }
+.record-actions .link-btn { margin-left: 0; }
+.link-btn--danger { color: var(--danger); }
+
+.record-badge {
+  flex: none; border-radius: 999px; padding: .2rem .5rem;
+  background: var(--surface-2); color: var(--muted);
+  font-size: .7rem; font-weight: 700; white-space: nowrap;
+}
+.record-badge--ok { background: color-mix(in srgb, var(--ok) 14%, var(--surface)); color: var(--ok); }
+.record-badge--info { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--accent); }
+.record-badge--warn { background: color-mix(in srgb, #d78b00 16%, var(--surface)); color: #8a5900; }
+.record-badge--danger { background: color-mix(in srgb, var(--danger) 14%, var(--surface)); color: var(--danger); }
+:root[data-theme="dark"] .record-badge--warn { color: #ffc35a; }
+
+.budget-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; margin-bottom: 1rem; }
+.budget-stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; text-align: center; }
+.budget-stat__value { font-size: 1.05rem; font-weight: 750; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.budget-stat--danger .budget-stat__value { color: var(--danger); }
+
+.compact-list { display: grid; gap: .5rem; }
+.compact-list__row { display: flex; justify-content: space-between; gap: .75rem; padding-top: .5rem; border-top: 1px solid var(--border); }
+.compact-list__row span:first-child { min-width: 0; overflow-wrap: anywhere; }
+
+.wellness-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .65rem; margin-bottom: 1rem; }
+.wellness-person { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); padding: .75rem; }
+.wellness-person--ok { border-left-color: var(--ok); }
+.wellness-person--warn { border-left-color: #d78b00; }
+.wellness-person--danger { border-left-color: var(--danger); }
+.wellness-person p { margin: .45rem 0 0; }
+
+@media (max-width: 430px) {
+  .budget-totals { grid-template-columns: 1fr; }
+  .record-card__head { align-items: flex-start; }
+  .record-actions { flex-wrap: wrap; }
+}
+
 /* --- onboarding --------------------------------------------------------- */
 
 .step__head { display: flex; align-items: center; gap: .6rem; margin-bottom: .5rem; }

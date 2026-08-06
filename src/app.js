@@ -23,6 +23,10 @@ import { setupView, signInView } from './views/setup.js';
 import { settingsView } from './views/settings.js';
 import { photosView, videosView, memoriesView } from './views/photos.js';
 import { feedView, calendarView } from './views/feed.js';
+import { financialRecordsView, expensesView, budgetView } from './views/money.js';
+import {
+  medicalInfoView, medicationsView, appointmentsView, careLogView, wellnessView,
+} from './views/care.js';
 import { onboardingView } from './views/onboarding.js';
 import { importTagsView, primeCatalog } from './views/import-tags.js';
 import {
@@ -326,6 +330,14 @@ function registerRoutes() {
   router.route('/memories', gated('memories', memoriesView));
   router.route('/feed', gated('feed', feedView));
   router.route('/calendar', gated('calendar', calendarView));
+  router.route('/medical', gated('medical', medicalInfoView));
+  router.route('/medications', gated('medications', medicationsView));
+  router.route('/appointments', gated('appointments', appointmentsView));
+  router.route('/carelog', gated('carelog', careLogView));
+  router.route('/wellness', gated('wellness', wellnessView));
+  router.route('/records', gated('records', financialRecordsView));
+  router.route('/expenses', gated('expenses', expensesView));
+  router.route('/budget', gated('budget', budgetView));
   router.route('/settings', settingsView);
   router.route('/setup-checklist', onboardingView);
   router.route('/photo-tags', importTagsView);

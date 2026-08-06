@@ -117,6 +117,90 @@ service cloud.firestore {
       allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
     }
 
+    // --- care and money records -------------------------------------------
+    // These collections contain the family's most sensitive reference data.
+    // They remain inside the same explicit member allowlist as the rest of the
+    // dashboard. A creator is stamped on every record; any family member may
+    // update shared information, but only its creator may remove it.
+    match /financial_records/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /expenses/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /budgets/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /medical_info/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /medications/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /medication_logs/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if false;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /appointments/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /care_logs/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
+    match /wellness_checks/{id} {
+      allow read: if isFamily();
+      allow create: if isFamily() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isFamily()
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if isFamily() && resource.data.createdBy == request.auth.uid;
+    }
+
     // Pointer records for files in Drive. The files themselves are protected by
     // Drive's own sharing, not by these rules.
     match /files/{id} {

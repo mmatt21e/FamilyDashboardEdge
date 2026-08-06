@@ -36,6 +36,10 @@ import {
 } from '../src/invites.js';
 import { detectPlatform, installGuidance, shouldOfferInstall, OS } from '../src/install.js';
 import { walkFolders } from '../src/drive.js';
+import {
+  budgetSummary, centsToInput, cleanText, formatMoney, moneyToCents,
+  monthKey, todayKey, wellnessForDay,
+} from '../src/records.js';
 
 const validConfig = {
   familyName: 'The Smiths',
@@ -230,6 +234,81 @@ describe('module registry', () => {
   test('the four priority modules from the brief are built', () => {
     for (const key of ['photos', 'memories', 'calendar', 'feed']) {
       assert.equal(getModule(key).status, 'ready', `${key} should be ready`);
+    }
+  });
+
+  test('the requested care and money modules are built but remain opt-in', () => {
+    const keys = [
+      'medical', 'medications', 'appointments', 'carelog', 'wellness',
+      'records', 'expenses', 'budget',
+    ];
+    const defaults = defaultState();
+    for (const key of keys) {
+      assert.equal(getModule(key).status, 'ready', `${key} should be ready`);
+      assert.equal(defaults[key], false, `${key} should start switched off`);
+      assert.equal(resolveState({ [key]: true })[key], true, `${key} should be switchable`);
+    }
+  });
+});
+
+describe('care and money records', () => {
+  test('stores money as integer cents and presents it consistently', () => {
+    assert.equal(moneyToCents('$1,234.56'), 123456);
+    assert.equal(moneyToCents('0'), 0);
+    assert.equal(moneyToCents('-2'), null);
+    assert.equal(moneyToCents('not money'), null);
+    assert.equal(centsToInput(123456), '1234.56');
+    assert.match(formatMoney(123456), /1,234\.56/);
+  });
+
+  test('summarises the selected month by category', () => {
+    const result = budgetSummary(
+      [
+        { month: '2026-08', category: 'Housing', plannedCents: 200000 },
+        { month: '2026-08', category: 'Health', plannedCents: 30000 },
+        { month: '2026-09', category: 'Housing', plannedCents: 999999 },
+      ],
+      [
+        { dueDate: '2026-08-01', category: 'Housing', amountCents: 175000 },
+        { dueDate: '2026-08-12', category: 'Health', amountCents: 40000 },
+        { dueDate: '2026-09-01', category: 'Housing', amountCents: 1 },
+      ],
+      '2026-08',
+    );
+    assert.equal(result.plannedCents, 230000);
+    assert.equal(result.recordedCents, 215000);
+    assert.equal(result.remainingCents, 15000);
+    assert.deepEqual(result.categories.find((item) => item.category === 'Health'), {
+      category: 'Health', plannedCents: 30000, recordedCents: 40000, remainingCents: -10000,
+    });
+  });
+
+  test('shows completed and missing wellness check-ins for one day', () => {
+    const result = wellnessForDay([
+      { person: 'Matt', day: '2026-08-05', status: 'good', createdAt: '2026-08-05T08:00:00Z' },
+      { person: 'Matt', day: '2026-08-05', status: 'needs-attention', createdAt: '2026-08-05T09:00:00Z' },
+      { person: 'Jo', day: '2026-08-04', status: 'good', createdAt: '2026-08-04T09:00:00Z' },
+    ], ['Matt', 'Jo'], '2026-08-05');
+    assert.equal(result.completed.length, 1);
+    assert.equal(result.completed[0].status, 'needs-attention');
+    assert.deepEqual(result.missing, ['Jo']);
+  });
+
+  test('uses local calendar keys and bounds saved text', () => {
+    assert.equal(monthKey(new Date(2026, 7, 5)), '2026-08');
+    assert.equal(todayKey(new Date(2026, 7, 5)), '2026-08-05');
+    assert.equal(cleanText('  hello\r\nworld  ', 20), 'hello\nworld');
+    assert.equal(cleanText('abcdef', 3), 'abc');
+  });
+
+  test('security rules explicitly cover every new sensitive collection', async () => {
+    const { readFileSync } = await import('node:fs');
+    const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
+    for (const collection of [
+      'financial_records', 'expenses', 'budgets', 'medical_info', 'medications',
+      'medication_logs', 'appointments', 'care_logs', 'wellness_checks',
+    ]) {
+      assert.ok(rules.includes(`match /${collection}/{id}`), `${collection} rules are missing`);
     }
   });
 });
