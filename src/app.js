@@ -12,7 +12,10 @@
 import { el, applyTheme, watchSystemTheme, toast, spinner } from './ui.js';
 import { loadConfig, isConfigured, saveConfig, readSetupLink } from './config.js';
 import { state, update, loadModuleSettings } from './store.js';
-import { isEnabled, navModules, getModule, resolveState } from './modules.js';
+import { isEnabled, navModules, getModule, resolveState, GROUPS } from './modules.js';
+import {
+  loadToolbarKeys, saveToolbarKeys, setToolbarPinned, toolbarModules,
+} from './toolbar.js';
 import * as fb from './firebase.js';
 import * as router from './router.js';
 import { diagnoseStartup, STARTUP_TIMEOUT_MS } from './diagnose.js';
@@ -281,6 +284,8 @@ async function redeemInvite(user) {
 }
 
 let started = false;
+let toolbarKeys = [];
+let featurePanel = null;
 
 function startApp() {
   disarmWatchdog();
@@ -292,6 +297,8 @@ function startApp() {
   const outlet = el('main', { class: 'app__main', id: 'main' });
   const nav = el('nav', { class: 'app__nav', 'aria-label': 'Sections' });
 
+  toolbarKeys = loadToolbarKeys(state.modules, state.user?.uid);
+
   screen(el('div', { class: 'app' }, outlet, nav));
   router.mount(outlet);
   router.setNavigationListener(() => drawNav(nav));
@@ -299,7 +306,11 @@ function startApp() {
 
   // Rebuild navigation when features are toggled, so a change in Settings shows
   // up immediately rather than after a reload.
-  window.addEventListener('fd:modules-changed', () => drawNav(nav));
+  window.addEventListener('fd:modules-changed', () => {
+    toolbarKeys = saveToolbarKeys(toolbarKeys, state.modules, state.user?.uid);
+    drawNav(nav);
+    if (featurePanel) renderFeaturePanel(nav);
+  });
 
   if (!location.hash) router.navigate('/', { replace: true });
   else router.render();
@@ -374,21 +385,118 @@ async function homeView() {
 function drawNav(nav) {
   const items = [
     { key: '/', icon: '🏡', title: 'Home' },
-    ...navModules(state.modules).map((m) => ({ key: `/${m.key}`, icon: m.icon, title: m.title })),
+    ...toolbarModules(state.modules, toolbarKeys)
+      .map((m) => ({ key: `/${m.key}`, icon: m.icon, title: m.title })),
+    { key: null, icon: '▦', title: 'Features', panel: true },
     { key: '/settings', icon: '⚙️', title: 'Settings' },
   ];
 
   const active = router.activePath() ?? '/';
   nav.replaceChildren(...items.map((item) =>
-    el('a', {
-      class: `nav-item${item.key === active ? ' is-active' : ''}`,
-      href: `#${item.key}`,
-      'aria-current': item.key === active ? 'page' : null,
-    },
-      el('span', { class: 'nav-item__icon' }, item.icon),
-      el('span', { class: 'nav-item__label' }, item.title),
-    )));
+    item.panel
+      ? el('button', {
+          class: `nav-item nav-item--button${featurePanel ? ' is-active' : ''}`,
+          type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': Boolean(featurePanel),
+          onClick: () => openFeaturePanel(nav),
+        },
+        el('span', { class: 'nav-item__icon' }, item.icon),
+        el('span', { class: 'nav-item__label' }, item.title))
+      : el('a', {
+          class: `nav-item${item.key === active ? ' is-active' : ''}`,
+          href: `#${item.key}`,
+          'aria-current': item.key === active ? 'page' : null,
+        },
+        el('span', { class: 'nav-item__icon' }, item.icon),
+        el('span', { class: 'nav-item__label' }, item.title),
+      )));
 }
+
+/** Opens every family-enabled feature without requiring a toolbar shortcut. */
+function openFeaturePanel(nav) {
+  if (featurePanel) return closeFeaturePanel(nav);
+
+  featurePanel = el('div', {
+    class: 'feature-panel-backdrop',
+    onClick: (event) => { if (event.target === featurePanel) closeFeaturePanel(nav); },
+  });
+  document.body.append(featurePanel);
+  document.body.classList.add('has-feature-panel');
+  renderFeaturePanel(nav);
+  drawNav(nav);
+  featurePanel.querySelector('.feature-panel__close')?.focus();
+}
+
+function closeFeaturePanel(nav) {
+  featurePanel?.remove();
+  featurePanel = null;
+  document.body.classList.remove('has-feature-panel');
+  drawNav(nav);
+  nav.querySelector('[aria-haspopup="dialog"]')?.focus();
+}
+
+function renderFeaturePanel(nav) {
+  if (!featurePanel) return;
+  const available = navModules(state.modules);
+  const pinned = new Set(toolbarKeys);
+
+  const groups = GROUPS.map((group) => ({
+    ...group,
+    modules: available.filter((module) => module.group === group.key),
+  })).filter((group) => group.modules.length);
+
+  featurePanel.replaceChildren(el('section', {
+    class: 'feature-panel', role: 'dialog', 'aria-modal': 'true',
+    'aria-labelledby': 'feature-panel-title',
+  },
+  el('header', { class: 'feature-panel__header' },
+    el('div', {},
+      el('h2', { id: 'feature-panel-title' }, 'All features'),
+      el('p', { class: 'muted small' }, 'Open any available feature or choose its toolbar shortcut.')),
+    el('button', {
+      class: 'feature-panel__close', type: 'button', 'aria-label': 'Close features',
+      onClick: () => closeFeaturePanel(nav),
+    }, '×')),
+  el('div', { class: 'feature-panel__content' },
+    groups.map((group) => el('section', { class: 'feature-panel__group' },
+      el('h3', { class: 'module-group__title' }, group.title),
+      group.modules.map((module) => {
+        const isPinned = pinned.has(module.key);
+        return el('div', { class: 'feature-panel__row' },
+          el('a', {
+            class: 'feature-panel__open', href: `#/${module.key}`,
+            onClick: () => closeFeaturePanel(nav),
+          },
+          el('span', { class: 'feature-panel__icon', 'aria-hidden': 'true' }, module.icon),
+          el('span', { class: 'feature-panel__text' },
+            el('span', { class: 'feature-panel__title' }, module.title),
+            el('span', { class: 'muted small' }, module.desc))),
+          el('button', {
+            class: `feature-panel__pin${isPinned ? ' is-pinned' : ''}`,
+            type: 'button', 'aria-pressed': isPinned,
+            'aria-label': `${isPinned ? 'Remove' : 'Add'} ${module.title} ${isPinned ? 'from' : 'to'} toolbar`,
+            onClick: () => {
+              toolbarKeys = setToolbarPinned(toolbarKeys, module.key, !isPinned, state.modules);
+              toolbarKeys = saveToolbarKeys(toolbarKeys, state.modules, state.user?.uid);
+              drawNav(nav);
+              renderFeaturePanel(nav);
+              toast(`${module.title} ${isPinned ? 'removed from' : 'added to'} toolbar`);
+            },
+          }, isPinned ? 'On toolbar' : 'Add'),
+        );
+      }),
+    )),
+    el('a', {
+      class: 'btn btn--block', href: '#/settings', onClick: () => closeFeaturePanel(nav),
+    }, 'Manage available features'),
+  )));
+}
+
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && featurePanel) {
+    const nav = document.querySelector('.app__nav');
+    if (nav) closeFeaturePanel(nav);
+  }
+});
 
 // The service worker is a progressive enhancement: if registration fails the
 // app still works, it just will not open offline.

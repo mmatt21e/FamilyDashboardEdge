@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v18';
+const CACHE_VERSION = 'v19';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -54,6 +54,7 @@ const SHELL = [
   './src/router.js',
   './src/store.js',
   './src/thumbs.js',
+  './src/toolbar.js',
   './src/ui.js',
   './src/update.js',
   './src/version.js',

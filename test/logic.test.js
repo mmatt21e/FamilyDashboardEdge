@@ -40,6 +40,9 @@ import {
   budgetSummary, centsToInput, cleanText, formatMoney, moneyToCents,
   monthKey, todayKey, wellnessForDay,
 } from '../src/records.js';
+import {
+  loadToolbarKeys, resolveToolbarKeys, saveToolbarKeys, setToolbarPinned, toolbarModules,
+} from '../src/toolbar.js';
 
 const validConfig = {
   familyName: 'The Smiths',
@@ -248,6 +251,45 @@ describe('module registry', () => {
       assert.equal(defaults[key], false, `${key} should start switched off`);
       assert.equal(resolveState({ [key]: true })[key], true, `${key} should be switchable`);
     }
+  });
+});
+
+describe('personal toolbar shortcuts', () => {
+  const available = resolveState({
+    photos: true, calendar: true, medical: true, budget: true, recipes: true,
+  });
+
+  test('starts compact with core shortcuts while every feature remains available', () => {
+    const keys = resolveToolbarKeys(null, available);
+    assert.ok(keys.includes('photos'));
+    assert.ok(keys.includes('calendar'));
+    assert.ok(!keys.includes('medical'));
+    assert.ok(!keys.includes('budget'));
+    assert.ok(!keys.includes('recipes'), 'planned features are never available');
+    assert.ok(navModules(available).some((module) => module.key === 'medical'));
+  });
+
+  test('toolbar choices do not change which features are available', () => {
+    const keys = setToolbarPinned(resolveToolbarKeys(null, available), 'medical', false, available);
+    assert.ok(!toolbarModules(available, keys).some((module) => module.key === 'medical'));
+    assert.ok(navModules(available).some((module) => module.key === 'medical'));
+  });
+
+  test('only enabled, known modules can be pinned', () => {
+    assert.deepEqual(resolveToolbarKeys(['medical', 'recipes', 'nonsense', 'medical'], available), ['medical']);
+  });
+
+  test('saves choices per signed-in person', () => {
+    const values = new Map();
+    const storage = {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, value),
+    };
+
+    saveToolbarKeys(['photos'], available, 'alex', storage);
+    saveToolbarKeys(['medical'], available, 'sam', storage);
+    assert.deepEqual(loadToolbarKeys(available, 'alex', storage), ['photos']);
+    assert.deepEqual(loadToolbarKeys(available, 'sam', storage), ['medical']);
   });
 });
 

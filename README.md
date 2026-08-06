@@ -27,6 +27,7 @@ and it never handles anyone else's data.
 | **Message board** — short updates and photos | Working |
 | **Care** — medical info, medications and dose log, appointments, care log, wellness checks | Working |
 | **Money** — safe financial references, bills and expenses, monthly shared budget | Working |
+| **Features panel** — open every available module and choose personal toolbar shortcuts | Working |
 | Settings with on/off switches for every feature | Working |
 | Per-person notification preferences | Preferences work; **sending needs a Cloud Function** |
 | Dark mode | Working |

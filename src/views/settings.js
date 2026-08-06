@@ -158,7 +158,7 @@ function modulesCard() {
   return el('section', { class: 'card' },
     el('h2', {}, 'Features'),
     el('p', { class: 'muted small' },
-      'Turn things on and off for the whole family. Changes apply on everyone’s phone.'),
+      'Choose what is available to the whole family. Each person can choose their own toolbar shortcuts from the Features panel.'),
     groupedModules().map((group) =>
       el('div', { class: 'module-group' },
         el('h3', { class: 'module-group__title' }, group.title),
