@@ -41,8 +41,8 @@ import {
  *   1. paint immediately from the pointer records in Firestore
  *   2. then scan Drive and reconcile
  *
- * Drive stays the source of truth for what exists - PhotoSync adds files
- * without this app knowing - but Firestore is what makes opening the app fast,
+ * Drive stays the source of truth for what exists - files may also be added
+ * outside the app - but Firestore is what makes opening the app fast,
  * and it is where captions and comments will hang off a photo later.
  */
 let inFlight = null;
@@ -1171,7 +1171,7 @@ const libraryState = {
  * The stored year wall, per library.
  *
  * Refreshed after every reconcile - which is also what runs after an in-app
- * upload, and what first notices a PhotoSync arrival - so the wall's counts
+ * upload, and what first notices a file added outside the app - so the wall's counts
  * and covers keep themselves current. Cover thumbnails the device does not
  * yet hold are warmed into the thumbnail cache, so the next open paints the
  * whole years screen from disk without a single network request.
@@ -1528,7 +1528,7 @@ const LIBRARY_COPY = {
     addLabel: 'Add photos',
     emptyIcon: '📷',
     emptyTitle: 'No photos yet',
-    emptyDetail: 'Once PhotoSync is set up on a phone, photos appear here on their own. You can also add some directly.',
+    emptyDetail: 'Tap Add photos to choose the pictures you want to share with the family.',
   },
   [KIND.VIDEO]: {
     title: 'Videos',
@@ -1536,7 +1536,7 @@ const LIBRARY_COPY = {
     addLabel: 'Add videos',
     emptyIcon: '🎬',
     emptyTitle: 'No videos yet',
-    emptyDetail: 'Videos from the shared folder appear here, separately from the photos. You can also add some directly.',
+    emptyDetail: 'Tap Add videos to choose the clips you want to share with the family.',
   },
 };
 

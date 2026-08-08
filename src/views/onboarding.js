@@ -1,25 +1,19 @@
 /**
  * Setup checklist.
  *
- * A PWA cannot install another app, cannot grant itself photo permissions and
- * cannot configure PhotoSync. All it can do is explain each step clearly, link
- * straight to the right place, and then *check whether it worked* - which is
- * the important part.
- *
- * Verification happens at the destination, not on the phone: the app watches
- * the shared Drive folder for that person's first photo. If it appears, it
- * worked; nothing else needs to be trusted or self-reported.
+ * The dashboard deliberately uses manual photo and video uploads for now.
+ * This keeps each person in control of exactly what they share with the family.
+ * The final check looks at the shared Drive destination so it confirms that an
+ * upload actually arrived, rather than merely trusting a completed checklist.
  */
 
-import { el, spinner, toast, pageHeader } from '../ui.js';
+import { el, spinner, pageHeader } from '../ui.js';
 import { goBack } from '../router.js';
 import { state } from '../store.js';
 import { listFolder } from '../drive.js';
 import { isStandalone } from '../firebase.js';
 
-const PHOTOSYNC_IOS = 'https://apps.apple.com/app/photosync-transfer-backup/id415850124';
-const PHOTOSYNC_ANDROID = 'https://play.google.com/store/apps/details?id=com.touchbyte.photosync';
-const PROGRESS_KEY = 'fd.onboarding.v1';
+const PROGRESS_KEY = 'fd.onboarding.v2';
 
 function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent)
@@ -41,19 +35,15 @@ export async function onboardingView() {
 
   const steps = [
     installStep(),
-    photoSyncInstallStep(),
-    photoAccessStep(),
-    destinationStep(),
-    autotransferStep(),
+    addPhotosStep(),
+    addVideosStep(),
   ];
-
-  const rendered = steps.map((step, index) => stepCard(step, index + 1, progress, redraw));
 
   function redraw() {
     saveProgress(progress);
     container.replaceChildren(
       pageHeader('Getting set up', {
-        subtitle: 'Five short steps, once per phone. Photos then arrive on their own.',
+        subtitle: 'Add only the photos and videos you choose to share.',
         onBack: () => goBack('/'),
       }),
       ...steps.map((step, index) => stepCard(step, index + 1, progress, redraw)),
@@ -114,78 +104,30 @@ function installStep() {
   };
 }
 
-function photoSyncInstallStep() {
+function addPhotosStep() {
   return {
-    key: 'photosync',
-    title: 'Install PhotoSync',
+    key: 'add-photos',
+    title: 'Add the photos you want to share',
     body: () => el('div', {},
       el('p', { class: 'muted' },
-        'PhotoSync is what actually moves photos off the phone. This app cannot do that itself — phones do not allow it.'),
+        'Open Photos, tap Add photos, and select one or more pictures from your phone. Nothing is uploaded unless you choose it.'),
       el('a', {
-        class: 'btn btn--primary', target: '_blank', rel: 'noopener',
-        href: isIOS() ? PHOTOSYNC_IOS : PHOTOSYNC_ANDROID,
-      }, isIOS() ? 'Open in the App Store' : 'Open in Google Play'),
+        class: 'btn btn--primary', href: '#/photos',
+      }, 'Open Photos'),
     ),
   };
 }
 
-function photoAccessStep() {
+function addVideosStep() {
   return {
-    key: 'access',
-    title: 'Give PhotoSync access to all photos',
+    key: 'add-videos',
+    title: 'Add the videos you want to share',
     body: () => el('div', {},
       el('p', { class: 'muted' },
-        'When PhotoSync asks for photos, choose ', el('strong', {}, 'All Photos'),
-        ' — not "Selected Photos". If it only gets a few, only a few will ever sync.'),
-      isIOS() && el('p', { class: 'muted small' },
-        'If you tapped the wrong option: Settings → PhotoSync → Photos → All Photos.'),
-    ),
-  };
-}
-
-/**
- * The folder ID is shown with a copy button rather than asking anyone to
- * transcribe a 33-character string on a phone keyboard.
- */
-function destinationStep() {
-  return {
-    key: 'destination',
-    title: 'Point PhotoSync at the family folder',
-    body: () => {
-      const folderId = state.config?.driveFolderId ?? '';
-      const copy = el('button', { class: 'btn' }, 'Copy folder ID');
-      copy.addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(folderId); toast('Folder ID copied'); }
-        catch { toast('Press and hold the ID to copy it'); }
-      });
-
-      return el('div', {},
-        el('ol', { class: 'help-list' },
-          el('li', {}, 'In PhotoSync, open ', el('strong', {}, 'Settings → Configure → Google Drive'), '.'),
-          el('li', {}, 'Sign in with your own Google account.'),
-          el('li', {}, 'Set the target folder to the family folder below.'),
-          el('li', {}, 'Give this phone its own subfolder named after you — that is how the app knows whose photos are whose.'),
-        ),
-        el('div', { class: 'code-row' }, el('code', {}, folderId || '—'), copy),
-        el('a', {
-          class: 'link', target: '_blank', rel: 'noopener',
-          href: `https://drive.google.com/drive/folders/${folderId}`,
-        }, 'Open the folder in Google Drive'),
-      );
-    },
-  };
-}
-
-function autotransferStep() {
-  return {
-    key: 'autotransfer',
-    title: 'Turn on Autotransfer',
-    body: () => el('div', {},
-      el('p', { class: 'muted' },
-        'In PhotoSync: ', el('strong', {}, 'Settings → Autotransfer'),
-        ' → turn it on and choose the Google Drive target you just set up.'),
-      el('p', { class: 'muted small' },
-        'Worth also enabling "when charging" so a big first upload does not flatten the battery.'),
+        'Open Videos, tap Add videos, and select the clips you want in the family library.'),
+      el('a', {
+        class: 'btn btn--primary', href: '#/videos',
+      }, 'Open Videos'),
     ),
   };
 }
@@ -193,11 +135,7 @@ function autotransferStep() {
 // --- verification ----------------------------------------------------------
 
 /**
- * Watches the shared folder for evidence that this phone's photos are arriving.
- *
- * Deliberately checks the destination rather than the device: PhotoSync can
- * look correctly configured and still not be uploading, and only the folder
- * knows the truth.
+ * Watches the shared folder for evidence that a manual upload arrived.
  */
 function verificationCard() {
   const status = el('div', {}, el('p', { class: 'muted' }, 'Not checked yet.'));
@@ -233,7 +171,7 @@ function verificationCard() {
           ? el('div', {},
               el('p', { class: 'status status--waiting' }, '⏳ Waiting for the first photo…'),
               el('p', { class: 'muted small' },
-                'Nothing has arrived yet. Open PhotoSync, make sure Autotransfer is on, and try a manual sync once — the first upload usually needs a nudge.'))
+                'Nothing has arrived yet. Open Photos or Videos and use the Add button to choose something to share.'))
           : el('div', {},
               el('p', { class: 'status status--ok' }, '✓ Connected'),
               el('p', { class: 'muted small' },
@@ -252,9 +190,9 @@ function verificationCard() {
   });
 
   return el('section', { class: 'card' },
-    el('h2', {}, 'Is it working?'),
+    el('h2', {}, 'Did the upload arrive?'),
     el('p', { class: 'muted small' },
-      'This looks in the shared folder rather than at your phone, so it tells you what actually arrived.'),
+      'This checks the shared family folder and tells you what actually arrived.'),
     check,
     status,
   );

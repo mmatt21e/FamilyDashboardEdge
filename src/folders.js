@@ -1,8 +1,8 @@
 /**
  * Building the shared folder's structure.
  *
- * Left to itself a shared Drive folder becomes a heap. PhotoSync drops files in
- * wherever it is pointed, people upload from the app, and two years later
+ * Left to itself a shared Drive folder becomes a heap. People add files outside
+ * the dashboard, upload from the app, and two years later
  * nobody can find anything - which quietly breaks the one promise this design
  * makes: that the photos live in plain Drive folders you can open and
  * understand without this app, forever.
@@ -25,10 +25,10 @@
  * That is the difference between a folder that stays legible and one that grows
  * a new entry every time somebody signs in.
  *
- * ONE THING THE APP STILL CANNOT DO: repoint PhotoSync. That is a setting on
- * each phone. (It CAN now move and rename what others uploaded - the family
- * owner granted full Drive access by name, for exactly that; see the scopes
- * note in drive.js.) A person folder at the top level still works as well as
+ * Files added through the dashboard already use this layout. It can also move
+ * and rename older or externally uploaded files inside the shared folder; the
+ * family owner granted full Drive access for that purpose (see drive.js).
+ * A person folder at the top level still works as well as
  * one inside the image store - see ownerFromPath in files.js. The structure
  * is a tidy default, not a requirement.
  */

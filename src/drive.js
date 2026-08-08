@@ -1,8 +1,8 @@
 /**
  * The shared Google Drive folder.
  *
- * PhotoSync on each phone uploads into this folder; the app reads from it and
- * can also upload directly. Firestore only ever holds pointer records.
+ * The app uploads each person's selected photos and videos into this folder and
+ * reads the shared family library from it. Firestore only holds pointer records.
  *
  * WHY DRIVE ACCESS IS SEPARATE FROM SIGN-IN
  * -----------------------------------------
@@ -18,8 +18,8 @@
  * Full `drive` access, granted DELIBERATELY - the family owner asked for it by
  * name after hearing the trade. The app started on the narrow pair
  * (`drive.readonly` + `drive.file`), which could read everything but move only
- * its own uploads; that left every video PhotoSync ever filed with the photos
- * permanently stuck there, and the owner chose the broader grant over dragging
+ * its own uploads; that left videos filed outside the app stuck with the photos,
+ * and the owner chose the broader grant over dragging
  * files by hand forever.
  *
  * The scope is a capability, not a behaviour: the code still touches nothing
@@ -365,8 +365,7 @@ const FOLDER_MIME = 'application/vnd.google-apps.folder';
  * Walks the whole shared folder.
  *
  * This used to stop after one level of subfolders and take the first 200 files
- * from each, which was fine for the case it was written for - PhotoSync
- * dropping photos into a folder per phone - and silently wrong for the case
+ * from each, which was fine for one folder per person and silently wrong for the case
  * that actually turned up. An organised archive is nested by year and month:
  *
  *     Family photos/01_Timeline/2015/2015-09/…

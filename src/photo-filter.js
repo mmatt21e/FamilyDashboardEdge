@@ -315,7 +315,7 @@ function groupIntoDecades(years) {
  * counts plus one cover per year - the newest photo, since the records arrive
  * newest-first - is everything a year card needs, and it fits in a few
  * kilobytes of device storage. Rebuilt after every scan, so uploads and
- * PhotoSync arrivals update the wall's counts and covers on their own.
+ * Newly discovered files update the wall's counts and covers on their own.
  */
 export function buildWallSummary(records = [], kind = null) {
   const byYear = new Map();

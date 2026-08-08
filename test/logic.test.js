@@ -462,7 +462,7 @@ describe('drive files', () => {
     assert.equal(parseExifDate(undefined), null);
   });
 
-  // This is the one that matters most: PhotoSync uploads a backlog all at once,
+  // This is the one that matters most: a backlog can be uploaded all at once,
   // so createdTime is when it synced, not when the photo was taken. Using it
   // would put a 2019 holiday into this week's memories.
   test('prefers the camera date over the upload date', () => {
@@ -2058,7 +2058,7 @@ describe('walking the shared folder', () => {
 // ---------------------------------------------------------------------------
 
 describe('working out whose photo it is from the path', () => {
-  // PhotoSync uploads into a folder per phone, so the top-level folder is
+  // Uploads use a folder per person, so the top-level folder is
   // normally the answer.
   test('the top-level folder is the person', () => {
     assert.equal(ownerFromPath(['Dad']), 'Dad');

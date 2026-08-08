@@ -169,6 +169,30 @@ describe('feature walkthrough', () => {
   });
 });
 
+describe('manual media setup', () => {
+  test('guides users to choose photos and videos without a separate sync app', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+
+    await page.evaluate(async () => {
+      const { onboardingView } = await import('./src/views/onboarding.js');
+      document.body.replaceChildren(await onboardingView());
+    });
+
+    const text = await page.locator('body').innerText();
+    assert.equal(await page.locator('section.step').count(), 3);
+    assert.match(text, /Add the photos you want to share/i);
+    assert.match(text, /Add the videos you want to share/i);
+    assert.match(text, /Nothing is uploaded unless you choose it/i);
+    for (const forbidden of [['Photo', 'Sync'].join(''), ['Auto', 'transfer'].join('')]) {
+      assert.ok(!text.toLowerCase().includes(forbidden.toLowerCase()));
+    }
+    assert.equal(await page.locator('a[href="#/photos"]').count(), 1);
+    assert.equal(await page.locator('a[href="#/videos"]').count(), 1);
+    await context.close();
+  });
+});
+
 describe('notification settings', () => {
   test('shows an overall switch and every activity category', async () => {
     const { page, context } = await openApp();

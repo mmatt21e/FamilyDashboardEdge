@@ -59,8 +59,8 @@ export function isManagedFolder(name) {
 /**
  * Who a photo belongs to, from the folders above it.
  *
- * The top-level folder is normally the answer - PhotoSync uploads into a folder
- * per phone, so `Dad/IMG_0042.jpg` is Dad's. But the app's own folders organise
+ * The top-level person folder is normally the answer, so `Dad/IMG_0042.jpg` is
+ * Dad's. But the app's own folders organise
  * rather than identify, so it looks one level past them:
  *
  *   Dad/2026/…                          -> Dad
@@ -199,7 +199,7 @@ export function dateFromFilename(name, { now = new Date() } = {}) {
 /**
  * The date a photo was actually taken, which is not the date it reached Drive.
  *
- * PhotoSync uploads a backlog all at once, so `createdTime` is when it synced,
+ * A backlog can be uploaded all at once, so `createdTime` is when it arrived,
  * often years after the photo was taken. Using it would put a 2015 holiday in
  * this week's memories and break the feature completely.
  *
@@ -231,8 +231,8 @@ export function originalDateFor(driveFile) {
 /**
  * Maps a Drive API file resource to the record stored in Firestore.
  *
- * `ownerHint` is the member this file is attributed to. PhotoSync uploads into
- * a per-person subfolder, so the folder name is usually the best signal for
+ * `ownerHint` is the member this file is attributed to. Uploads use a
+ * per-person subfolder, so the folder name is usually the best signal for
  * whose photo it is - Drive reports the *account* that owns the file, which for
  * a shared folder is often whoever set it up rather than who took the picture.
  */

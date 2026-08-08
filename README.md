@@ -34,11 +34,11 @@ and it never handles anyone else's data.
 | Per-person activity notifications with an overall switch and category choices | Working while the PWA is open; fully closed delivery needs background sending |
 | Dark mode | Working |
 | Version number and one-tap update check in Settings | Working |
-| Setup checklist with PhotoSync walkthrough | Working |
+| Setup checklist with manual photo and video upload walkthrough | Working |
 | Remaining features from the original plan | All implemented and unlocked in version 2.0 |
 
-Photos and videos are moved off phones by **PhotoSync**, not by this app — a web
-app cannot do that on iOS. The dashboard reads the folder PhotoSync uploads to.
+Each person manually chooses the photos and videos they want to share. The app
+uploads those selected files to the shared family Drive folder.
 
 ---
 
@@ -195,21 +195,17 @@ keeps the same offer for whenever they change their mind.
 
 ---
 
-## Getting photos flowing
+## Adding photos and videos
 
-Open **Setup checklist** in the app on each phone. It walks through installing
-PhotoSync, granting full photo access, pointing it at the shared folder, and
-turning on Autotransfer.
+Open **Setup checklist** in the app on each phone. It shows how to install the
+dashboard and use **Add photos** or **Add videos** to choose files manually.
 
-The last step checks the **shared folder**, not the phone, and reports "Waiting
-for the first photo…" or "Connected". Checking at the destination is the only
-way to know it really worked — PhotoSync can look correctly set up and still not
-be uploading.
+The final check reads the **shared folder** and reports "Waiting for the first
+photo…" or "Connected", so the person can confirm that their upload arrived.
 
-Point PhotoSync at `Dashboard_Image_Storage/<your name>` — the app creates that
-folder for each family member. That is how it knows whose photos are whose. A
-folder at the top level named after the person works just as well, so an
-existing setup does not need changing.
+The app automatically stores manual uploads under
+`Dashboard_Image_Storage/<your name>` or `Dashboard_Video_Storage/<your name>`.
+Users do not need to configure or manage those folders themselves.
 
 ### Filtering by who is in a photo
 
@@ -309,11 +305,9 @@ a toolchain is the thing most likely to rot first.
 ## How it fits together
 
 ```
-Phones ──PhotoSync──▶ Shared Google Drive folder ◀──reads/uploads── This app
-                                                                        │
-                                              messages, calendar,       │
-                                              module settings ──────────┘
-                                                    Firestore
+Phone or computer ──manual selection──▶ This app ──uploads──▶ Shared Google Drive folder
+                                           │
+                                           └── messages, calendar and module settings ──▶ Firestore
 ```
 
 - **Drive** holds the files. Photos stay photos and documents stay PDFs, so the
@@ -477,20 +471,17 @@ whole point: a new member gets a folder inside the photo store, not another
 entry at the root. Uploads from the app go under whoever added them and then by
 month, so nothing is ever dropped loose in the shared folder.
 
-Point PhotoSync at `Dashboard_Image_Storage/<your name>` on each phone. A person
-folder at the *top* level works exactly as well — the app reads whichever it
-finds — so an existing setup does not need changing.
+Manual uploads are placed in `Dashboard_Image_Storage/<your name>` or
+`Dashboard_Video_Storage/<your name>` automatically. A person folder at the
+*top* level still works for an older library — the app reads whichever it finds.
 
 The app holds **full Google Drive access**, granted deliberately by the family
 owner: the earlier narrow scopes could read everything but move only the app's
-own uploads, which left every misfiled PhotoSync video permanently stuck. The
+own uploads, which left externally filed videos permanently stuck. The
 scope is a capability, not a behaviour — the code touches nothing outside the
 shared folder, this repository is the audit trail for that claim, and the grant
 can be withdrawn any time at myaccount.google.com/permissions. Each person
 approves it once, on their next visit to Photos.
-
-One thing the app still cannot do: **repoint PhotoSync.** That is a setting on
-each phone.
 
 Nesting is fine at any depth — the scan walks the whole tree with pagination.
 The photo's *owner* is worked out from the whole path, skipping folders the app
@@ -502,8 +493,8 @@ the people tags are what say who.
 
 ## Known limits
 
-- **iOS will not let a web app work in the background.** Data refreshes when you
-  open the app. This is why PhotoSync does the photo syncing.
+- **Uploads are manual.** The user chooses the photos or videos to share, and
+  the upload runs while the dashboard is open.
 - **Drive access needs a token that expires.** The app renews it silently on
   open; occasionally you may need to reload.
 - **Everyone in the family can see everything.** There are no per-person

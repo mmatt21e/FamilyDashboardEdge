@@ -40,7 +40,7 @@ export const MODULES = [
   { key: 'members',    group: 'foundation', title: 'Family members',   icon: '👪', always: true, status: 'ready', desc: 'Who is in the family and their sign-in.' },
   { key: 'settings',   group: 'foundation', title: 'Settings',         icon: '⚙️', always: true, status: 'ready', desc: 'Turn features on and off, appearance, setup.' },
   { key: 'files',      group: 'foundation', title: 'Shared storage',   icon: '🗄️', always: true, status: 'ready', desc: 'The shared Google Drive folder everything is kept in.' },
-  { key: 'onboarding', group: 'foundation', title: 'Setup checklist',  icon: '✅', always: true, status: 'ready', desc: 'Getting each phone installed and syncing photos.' },
+  { key: 'onboarding', group: 'foundation', title: 'Setup checklist',  icon: '✅', always: true, status: 'ready', desc: 'Installing the app and manually sharing photos and videos.' },
 
   // --- priority modules -----------------------------------------------------
   { key: 'photos',    group: 'daily', title: 'Photos',        icon: '📷', status: 'ready', defaultOn: true, toolbarDefault: true, desc: 'Everyone\'s photos from the shared folder, newest first.' },
