@@ -9,6 +9,7 @@
 import { el, spinner, emptyState, toast, formatDate, children } from '../ui.js';
 import { interpretDriveFailure } from '../diagnose.js';
 import { state, update, filesAreStale } from '../store.js';
+import { recordActivity } from '../notifications.js';
 import * as fb from '../firebase.js';
 import {
   listSharedMedia, fetchFileBlobUrl, refreshThumbnailLink, uploadFile, forgetDriveAccess,
@@ -1097,6 +1098,14 @@ function uploadButton({ accept = 'image/*,video/*', label = 'Add photos' } = {})
     button.disabled = false;
     if (done) {
       toast(`Added ${done} ${done === 1 ? 'item' : 'items'}${tagged ? ' with tags' : ''}`);
+      void recordActivity({
+        category: 'photos',
+        title: done === 1 ? 'New family photo' : 'New family photos',
+        body: `${state.member?.name ?? 'Someone'} added ${done} ${done === 1 ? 'photo or video' : 'photos or videos'}.`,
+        url: '#/photos',
+        sourceId: uploaded[0]?.id ?? null,
+        count: done,
+      });
       await loadFiles({ force: true });
       window.dispatchEvent(new CustomEvent('fd:files-changed'));
     }

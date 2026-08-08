@@ -3,3 +3,4 @@ graphify-out/
 *.log
 .DS_Store
 .env
+.Codex/handoff.md

@@ -10,7 +10,7 @@
  * Bump CACHE_VERSION whenever the shell changes.
  */
 
-const CACHE_VERSION = 'v22';
+const CACHE_VERSION = 'v23';
 
 // Replaced at deploy time (see .github/workflows/deploy.yml), so every deploy
 // gets a cache of its own automatically. Relying on a hand-bumped version
@@ -105,6 +105,44 @@ self.addEventListener('activate', (event) => {
 // screen can be days.
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+// ---------------------------------------------------------------------------
+// Family activity notifications
+// ---------------------------------------------------------------------------
+// Open PWAs call registration.showNotification() directly. A future trusted
+// sender can deliver the same JSON through Web Push when the app is closed;
+// keeping both paths on one payload means enabling that sender changes no UI.
+self.addEventListener('push', (event) => {
+  let activity = {};
+  try { activity = event.data?.json?.() ?? {}; }
+  catch { activity = { body: event.data?.text?.() ?? '' }; }
+
+  event.waitUntil(self.registration.showNotification(
+    activity.title || 'New family activity',
+    {
+      body: activity.body || 'Something new was added to Family Dashboard.',
+      icon: './assets/icon-192.png',
+      badge: './assets/icon-192.png',
+      tag: activity.tag || `family-${activity.category || 'activity'}`,
+      data: { url: activity.url || '#/' },
+    },
+  ));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL(event.notification.data?.url || '#/', self.registration.scope).href;
+
+  event.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    .then(async (windows) => {
+      const existing = windows[0];
+      if (existing) {
+        if ('navigate' in existing) await existing.navigate(target);
+        return existing.focus();
+      }
+      return self.clients.openWindow(target);
+    }));
 });
 
 // ---------------------------------------------------------------------------

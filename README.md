@@ -31,7 +31,7 @@ and it never handles anyone else's data.
 | **All planned modules** — coordination, documents, history, household, and family-fun tools | Working |
 | Searchable HTML walkthrough for every module | Working |
 | Settings with on/off switches for every feature | Working |
-| Per-person notification preferences | Preferences work; **sending needs a Cloud Function** |
+| Per-person activity notifications with an overall switch and category choices | Working while the PWA is open; fully closed delivery needs background sending |
 | Dark mode | Working |
 | Version number and one-tap update check in Settings | Working |
 | Setup checklist with PhotoSync walkthrough | Working |
@@ -362,15 +362,30 @@ audited `list_items` structure rather than duplicating a new data layer.
 
 ---
 
+## Notification delivery
+
+Settings → **Notifications** lets each signed-in family member turn all alerts
+on or off and independently choose posts/replies, photos/videos, calendar,
+care, money, and other family activity. A member never receives an alert for
+their own action, including on their other signed-in devices. Care and money
+notifications intentionally say only that an update was added; private details
+do not appear in a lock-screen preview.
+
+- **Available now:** an open PWA, including a background browser tab, listens for
+  privacy-safe `activity_events` and displays a system notification through the
+  service worker.
+- **Fully closed PWA:** waking an app that the phone has suspended requires a
+  trusted Web Push sender. The service worker accepts that payload, but deploying
+  the Firebase Cloud Function requires the project to be linked to the Blaze
+  pay-as-you-go plan. The current `familydashboardedge` project has no billing
+  account linked, so this release does not pretend closed-app delivery is active.
+- On iPhone, web notifications require iOS 16.4 or later and the dashboard must
+  be installed on the Home Screen.
+
 ## Not built yet
 
 Being explicit, so nothing here is a surprise:
 
-- **Sending notifications.** Preferences, permission and device registration all
-  work and are stored per person. Nothing can actually *send* a push, because a
-  static site has no server — that needs a Cloud Function on your own Firebase
-  project, triggered by new documents in `messages` or `calendar_events`. The
-  Settings screen says so rather than showing a switch that does nothing.
 - **No explicit export button.** Not needed for the inheritance goal: the shared
   Drive folder already *is* the plain readable archive — photos as photos, PDFs
   as PDFs, openable without this app ever existing.
@@ -390,8 +405,8 @@ from the Features panel. Existing installations must publish the current
 - Medications keeps the current list and a simple dose log. Appointments covers
   preparation, location, transport and completion. Care log is a chronological
   handoff between family members. Wellness check shows who has and has not
-  checked in today; sending an alert for a missed check still requires the same
-  Cloud Function as other push notifications.
+  checked in today; new care activity uses generic notification wording so
+  sensitive details stay inside the signed-in dashboard.
 - Financial records is intentionally a safe index rather than a password vault:
   use nicknames and last-four references only. Bills & expenses tracks dates,
   status and recurring costs. Shared budget compares monthly category plans with

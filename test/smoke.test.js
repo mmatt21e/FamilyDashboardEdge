@@ -169,6 +169,35 @@ describe('feature walkthrough', () => {
   });
 });
 
+describe('notification settings', () => {
+  test('shows an overall switch and every activity category', async () => {
+    const { page, context } = await openApp();
+    await page.waitForSelector('.view--setup');
+
+    await page.evaluate(async () => {
+      Object.defineProperty(globalThis, 'Notification', {
+        configurable: true,
+        value: { permission: 'granted', requestPermission: async () => 'granted' },
+      });
+      const { notificationsCard } = await import('./src/views/notifications-card.js');
+      document.body.replaceChildren(await notificationsCard());
+    });
+
+    assert.equal(await page.locator('.module-row').count(), 7);
+    const text = await page.locator('section.card').innerText();
+    for (const label of [
+      'All notifications', 'Posts and replies', 'Photos and videos',
+      'Calendar changes', 'Care and wellness activity', 'Money activity',
+      'Other family activity',
+    ]) {
+      assert.match(text, new RegExp(label, 'i'));
+    }
+    assert.match(text, /own posts and uploads never notify you/i);
+    assert.match(text, /Send a test notification/i);
+    await context.close();
+  });
+});
+
 describe('public account information', () => {
   test('publishes readable privacy and terms pages', async () => {
     for (const pageName of ['privacy.html', 'terms.html']) {

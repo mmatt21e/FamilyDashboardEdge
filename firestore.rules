@@ -87,6 +87,37 @@ service cloud.firestore {
         && (!changed.hasAny(['sentBy']) || request.resource.data.sentBy == request.auth.uid);
     }
 
+    // Notification text is deliberately a small, generic envelope. Medical
+    // and money details never need to be copied into an activity record just
+    // to say that something changed.
+    function safeActivity() {
+      return request.resource.data.keys().hasAll([
+          'category', 'actorUid', 'actorName', 'title', 'body', 'url', 'createdAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'category', 'actorUid', 'actorName', 'title', 'body', 'url', 'createdAt',
+          'sourceId', 'count'
+        ])
+        && request.resource.data.category in [
+          'feed', 'photos', 'calendar', 'care', 'money', 'family'
+        ]
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorName is string
+        && request.resource.data.actorName.size() <= 120
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 80
+        && request.resource.data.body is string
+        && request.resource.data.body.size() <= 160
+        && request.resource.data.url is string
+        && request.resource.data.url.size() <= 128
+        && request.resource.data.createdAt is string
+        && (!request.resource.data.keys().hasAny(['sourceId'])
+            || request.resource.data.sourceId is string)
+        && (!request.resource.data.keys().hasAny(['count'])
+            || request.resource.data.count is int);
+    }
+
     // --- members ------------------------------------------------------------
     match /members/{uid} {
       allow read: if isFamily();
@@ -273,13 +304,48 @@ service cloud.firestore {
     // Per-person notification preferences. Yours alone - nobody else in the
     // family needs to see or change what you have opted into.
     match /notification_prefs/{uid} {
-      allow read, write: if isFamily() && request.auth.uid == uid;
+      allow read: if isFamily() && request.auth.uid == uid;
+      allow create, update: if isFamily()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasAll(['uid', 'enabled', 'categories', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['uid', 'enabled', 'categories', 'updatedAt'])
+        && request.resource.data.uid == uid
+        && request.resource.data.enabled is bool
+        && request.resource.data.updatedAt is string
+        && request.resource.data.categories is map
+        && request.resource.data.categories.keys().hasAll([
+          'feed', 'photos', 'calendar', 'care', 'money', 'family'
+        ])
+        && request.resource.data.categories.keys().hasOnly([
+          'feed', 'photos', 'calendar', 'care', 'money', 'family'
+        ])
+        && request.resource.data.categories.feed is bool
+        && request.resource.data.categories.photos is bool
+        && request.resource.data.categories.calendar is bool
+        && request.resource.data.categories.care is bool
+        && request.resource.data.categories.money is bool
+        && request.resource.data.categories.family is bool;
+      allow delete: if isFamily() && request.auth.uid == uid;
     }
 
-    // Registered devices for push. Written by the owning member only.
-    match /devices/{id} {
+    // Generic activity envelopes are family-readable so an open PWA can
+    // deliver them. Only the actor may create one, and nobody edits history.
+    match /activity_events/{id} {
       allow read: if isFamily();
-      allow write: if isFamily() && request.resource.data.uid == request.auth.uid;
+      allow create: if isFamily() && safeActivity();
+      allow update, delete: if false;
+    }
+
+    // Push endpoints are credentials for reaching a particular device. Other
+    // family members do not need to see them; a future trusted sender bypasses
+    // client rules through the Admin SDK.
+    match /devices/{id} {
+      allow read: if isFamily() && resource.data.uid == request.auth.uid;
+      allow create: if isFamily() && request.resource.data.uid == request.auth.uid;
+      allow update: if isFamily()
+        && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isFamily() && resource.data.uid == request.auth.uid;
     }
 
     // Audited records for the additional modular features: discussions,

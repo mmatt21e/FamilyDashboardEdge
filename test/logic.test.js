@@ -41,7 +41,7 @@ import { detectPlatform, installGuidance, shouldOfferInstall, OS } from '../src/
 import { walkFolders } from '../src/drive.js';
 import {
   budgetSummary, centsToInput, cleanText, formatMoney, moneyToCents,
-  monthKey, todayKey, wellnessForDay,
+  monthKey, todayKey, wellnessForDay, activityForRecord,
 } from '../src/records.js';
 import {
   loadToolbarKeys, resolveToolbarKeys, saveToolbarKeys, setToolbarPinned, toolbarModules,
@@ -380,6 +380,9 @@ describe('care and money records', () => {
     ]) {
       assert.ok(rules.includes(`match /${collection}/{id}`), `${collection} rules are missing`);
     }
+    assert.match(rules, /match \/activity_events\/\{id\}/);
+    assert.match(rules, /request\.resource\.data\.actorUid == request\.auth\.uid/);
+    assert.match(rules, /'feed', 'photos', 'calendar', 'care', 'money', 'family'/);
   });
 });
 
@@ -536,20 +539,65 @@ describe('drive files', () => {
 describe('notification preferences', () => {
   // These import lazily because notifications.js reaches for browser globals
   // that do not exist under node; only the pure parts are exercised here.
-  test('categories only cover features that are actually built', async () => {
+  test('offers the complete set of privacy-safe activity categories', async () => {
     const { categories } = await import('../src/notifications.js');
-    const { getModule } = await import('../src/modules.js');
-    for (const category of categories()) {
-      assert.equal(getModule(category.key)?.status, 'ready',
-        `${category.key} is offered as a notification category but is not built`);
-    }
+    assert.deepEqual(categories().map(({ key }) => key), [
+      'feed', 'photos', 'calendar', 'care', 'money', 'family',
+    ]);
   });
 
-  test('everything is opted in by default', async () => {
+  test('new members choose whether to opt in, with every category ready', async () => {
     const { defaultPrefs, categories } = await import('../src/notifications.js');
     const prefs = defaultPrefs();
-    assert.equal(Object.keys(prefs).length, categories().length);
-    assert.ok(Object.values(prefs).every(Boolean));
+    assert.equal(prefs.enabled, false);
+    assert.equal(Object.keys(prefs.categories).length, categories().length);
+    assert.ok(Object.values(prefs.categories).every(Boolean));
+  });
+
+  test('preserves the opt-in represented by an older preferences document', async () => {
+    const { normalisePrefs } = await import('../src/notifications.js');
+    const prefs = normalisePrefs({ categories: { feed: false } }, { existing: true });
+    assert.equal(prefs.enabled, true);
+    assert.equal(prefs.categories.feed, false);
+    assert.equal(prefs.categories.photos, true);
+  });
+
+  test('notification copy never exposes care or money record contents', () => {
+    const medical = activityForRecord('medical_info', {
+      allergies: 'private allergy', insurance: 'private number',
+    }, 'Alex');
+    const money = activityForRecord('expenses', {
+      merchant: 'private merchant', amountCents: 123456,
+    }, 'Alex');
+
+    assert.equal(medical.category, 'care');
+    assert.equal(money.category, 'money');
+    assert.doesNotMatch(JSON.stringify(medical), /private allergy|private number/i);
+    assert.doesNotMatch(JSON.stringify(money), /private merchant|123456/i);
+  });
+
+  test('routes replies back to the message board', () => {
+    assert.deepEqual(activityForRecord('list_items', { moduleKey: 'comments' }, 'Alex'), {
+      category: 'feed',
+      title: 'New reply',
+      body: 'Alex replied to a family post.',
+      url: '#/feed',
+    });
+  });
+
+  test('delivers only unseen enabled activity from another member', async () => {
+    const { activitiesToNotify, normalisePrefs } = await import('../src/notifications.js');
+    const prefs = normalisePrefs({ enabled: true, categories: { photos: false } });
+    const events = [
+      { id: 'old', category: 'feed', actorUid: 'other', createdAt: '2026-08-08T10:00:00Z' },
+      { id: 'mine', category: 'feed', actorUid: 'me', createdAt: '2026-08-08T10:01:00Z' },
+      { id: 'photo', category: 'photos', actorUid: 'other', createdAt: '2026-08-08T10:02:00Z' },
+      { id: 'new', category: 'feed', actorUid: 'other', createdAt: '2026-08-08T10:03:00Z' },
+    ];
+    assert.deepEqual(
+      activitiesToNotify(events, new Set(['old']), 'me', prefs).map(({ id }) => id),
+      ['new'],
+    );
   });
 });
 
@@ -2180,6 +2228,15 @@ describe('version reporting', () => {
     const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
     assert.match(sw, /SKIP_WAITING/);
     assert.match(sw, /addEventListener\('message'/);
+  });
+
+  test('the service worker displays pushed activity and opens its destination', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+    assert.match(sw, /addEventListener\('push'/);
+    assert.match(sw, /showNotification/);
+    assert.match(sw, /addEventListener\('notificationclick'/);
+    assert.match(sw, /openWindow/);
   });
 
   test('a stale installed app can force its way onto the served build', async () => {

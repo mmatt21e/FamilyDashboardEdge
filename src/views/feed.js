@@ -10,6 +10,7 @@ import { el, spinner, emptyState, toast, relativeTime, formatDate } from '../ui.
 import { state } from '../store.js';
 import * as fb from '../firebase.js';
 import { RECORD_COLLECTIONS, removeRecord, saveRecord } from '../records.js';
+import { recordActivity } from '../notifications.js';
 
 // ---------------------------------------------------------------------------
 // Message board
@@ -31,12 +32,19 @@ export async function feedView() {
     if (!body) return;
     post.disabled = true;
     try {
-      await fb.addDoc('messages', {
+      const messageId = await fb.addDoc('messages', {
         body,
         authorId: state.user?.uid ?? null,
         authorName: state.member?.name ?? 'Someone',
         authorPhoto: state.member?.photoURL ?? null,
         createdAt: new Date().toISOString(),
+      });
+      void recordActivity({
+        category: 'feed',
+        title: 'New family post',
+        body: `${state.member?.name ?? 'Someone'} shared a new post.`,
+        url: '#/feed',
+        sourceId: messageId,
       });
       textarea.value = '';
       toast('Posted');
@@ -180,13 +188,20 @@ export async function calendarView() {
 
     add.disabled = true;
     try {
-      await fb.addDoc('calendar_events', {
+      const eventId = await fb.addDoc('calendar_events', {
         title: name,
         start: start.value,
         end: end.value || start.value,
         createdBy: state.user?.uid ?? null,
         createdByName: state.member?.name ?? 'Someone',
         createdAt: new Date().toISOString(),
+      });
+      void recordActivity({
+        category: 'calendar',
+        title: 'New calendar item',
+        body: `${state.member?.name ?? 'Someone'} added something to the family calendar.`,
+        url: '#/calendar',
+        sourceId: eventId,
       });
       title.value = ''; start.value = ''; end.value = '';
       toast('Added to the calendar');

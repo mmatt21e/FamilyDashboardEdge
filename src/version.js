@@ -13,7 +13,7 @@
  * development build, which is the truth.
  */
 
-export const APP_VERSION = '2.1.1';
+export const APP_VERSION = '2.2.0';
 
 // Replaced at deploy time - see .github/workflows/deploy.yml.
 export const BUILD_SHA = '__BUILD_SHA__';

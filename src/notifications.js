@@ -1,57 +1,54 @@
 /**
- * Per-person notification preferences.
+ * Per-person notification preferences and delivery.
  *
- * WHAT IS HONEST ABOUT THIS
- * -------------------------
- * A static site on GitHub Pages has no server, and nothing can *send* a push
- * without one. So this module owns the half that genuinely works offline of a
- * backend: capability detection, the permission prompt, and each person's
- * per-feature preferences stored in Firestore so they follow them between
- * devices.
+ * The dashboard is hosted as a static GitHub Pages PWA, so there are two
+ * honest delivery levels:
  *
- * Actual delivery needs a sender - a Cloud Function on the family's own Firebase
- * project, triggered by new Firestore documents. `deliveryConfigured()` reports
- * whether that has been set up, and the UI says so plainly rather than letting
- * anyone switch on a toggle that quietly does nothing.
+ *   1. Firestore activity events can reach every signed-in device while the
+ *      PWA is open (including a background tab) and display a system
+ *      notification through the service worker. This works today.
+ *   2. Waking a fully closed PWA requires a trusted push sender. The data model
+ *      and service worker are ready for that sender, but Firebase Cloud
+ *      Functions cannot be deployed until the project has billing enabled.
  *
- * PLATFORM REALITY
- * ----------------
- * iOS only allows web push from a PWA that has been added to the home screen,
- * and only on iOS 16.4+. In Safari as a normal tab there is no Notification API
- * at all. That is why `capability()` distinguishes "cannot" from "not yet" -
- * telling an iPhone user to enable notifications that cannot exist is worse
- * than saying nothing.
+ * Preferences belong to a person rather than a device. Someone can turn all
+ * notifications off, or choose categories, and the choice follows their
+ * Google account between phone and tablet. Activity created by the same UID is
+ * always ignored, so a person's second device does not announce their own post.
  */
 
 import * as fb from './firebase.js';
 import { state } from './store.js';
-import { readyModules } from './modules.js';
 
-/** Categories a person can opt in or out of, derived from the built modules. */
+const PATH = 'notification_prefs';
+const ACTIVITY_PATH = 'activity_events';
+
+const CATEGORY_LIST = Object.freeze([
+  { key: 'feed', title: 'Posts and replies' },
+  { key: 'photos', title: 'Photos and videos' },
+  { key: 'calendar', title: 'Calendar changes' },
+  { key: 'care', title: 'Care and wellness activity' },
+  { key: 'money', title: 'Money activity' },
+  { key: 'family', title: 'Other family activity' },
+]);
+
+const CATEGORY_KEYS = new Set(CATEGORY_LIST.map((category) => category.key));
+
 export function categories() {
-  return [
-    { key: 'feed', title: 'New posts on the message board' },
-    { key: 'photos', title: 'New photos added' },
-    { key: 'calendar', title: 'Calendar changes and reminders' },
-    { key: 'memories', title: 'A daily nudge when there are memories' },
-  ].filter((category) => readyModules().some((m) => m.key === category.key));
+  return CATEGORY_LIST.map((category) => ({ ...category }));
 }
 
-/**
- * What this device can actually do.
- * @returns {{supported:boolean, reason:string|null, permission:string}}
- */
+/** What this browser/device can actually do. */
 export function capability() {
   const permission = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
 
   if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
-    // Most commonly an iPhone in a normal Safari tab.
     const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     return {
       supported: false,
       permission,
       reason: iOS
-        ? 'On iPhone, notifications only work once this app has been added to your home screen.'
+        ? 'On iPhone, notifications work after this app is added to your home screen.'
         : 'This browser does not support notifications.',
     };
   }
@@ -68,59 +65,13 @@ export async function requestPermission() {
   }
 }
 
-/**
- * Whether the family has set up something capable of sending.
- *
- * The VAPID key is entered in Setup alongside the other account details. Until
- * it is present, preferences are still saved - they just have no effect yet,
- * and the UI says so.
- */
-export function deliveryConfigured() {
+/** Optional seam used when a trusted closed-app sender is configured later. */
+export function closedAppDeliveryConfigured() {
   return Boolean(state.config?.vapidKey);
 }
 
-// ---------------------------------------------------------------------------
-// Preferences
-// ---------------------------------------------------------------------------
-// Stored per member so they follow the person between their phone and tablet,
-// rather than being stuck in one device's localStorage.
-
-const PATH = 'notification_prefs';
-
-export function defaultPrefs() {
-  const prefs = {};
-  for (const category of categories()) prefs[category.key] = true;
-  return prefs;
-}
-
-export async function loadPrefs(uid = state.user?.uid) {
-  if (!uid) return defaultPrefs();
-  try {
-    const doc = await fb.getDoc(PATH, uid);
-    return { ...defaultPrefs(), ...(doc?.categories ?? {}) };
-  } catch {
-    return defaultPrefs();
-  }
-}
-
-export async function savePrefs(prefs, uid = state.user?.uid) {
-  if (!uid) return;
-  await fb.setDoc(PATH, uid, {
-    uid,
-    categories: prefs,
-    updatedAt: new Date().toISOString(),
-  });
-}
-
-/**
- * Registers this device so a future sender can reach it.
- *
- * Stored per device rather than per person: one member may have a phone and a
- * tablet, and a stale token from a replaced phone must not silently take the
- * place of the new one.
- */
 export async function registerDevice() {
-  if (!deliveryConfigured()) return null;
+  if (!closedAppDeliveryConfigured()) return null;
   const { supported, permission } = capability();
   if (!supported || permission !== 'granted') return null;
 
@@ -130,10 +81,7 @@ export async function registerDevice() {
       userVisibleOnly: true,
       applicationServerKey: state.config.vapidKey,
     });
-
     const json = subscription.toJSON();
-    // Keyed on the endpoint so re-registering the same device updates in place
-    // instead of piling up duplicates every time the app opens.
     const id = await hash(json.endpoint);
     await fb.setDoc('devices', id, {
       uid: state.user?.uid ?? null,
@@ -151,5 +99,162 @@ export async function registerDevice() {
 async function hash(text) {
   const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 32);
+}
+
+/** New users choose whether to opt in; categories are ready when they do. */
+export function defaultPrefs() {
+  return {
+    enabled: false,
+    categories: Object.fromEntries(CATEGORY_LIST.map(({ key }) => [key, true])),
+  };
+}
+
+export function normalisePrefs(value, { existing = false } = {}) {
+  const defaults = defaultPrefs();
+  const supplied = value?.categories && typeof value.categories === 'object'
+    ? value.categories
+    : value;
+  const merged = { ...defaults.categories };
+  for (const key of CATEGORY_KEYS) {
+    if (typeof supplied?.[key] === 'boolean') merged[key] = supplied[key];
+  }
+
+  // Old preference documents predate the master switch. If one exists, the
+  // member had already pressed "Turn on notifications", so preserve that opt-in.
+  const enabled = typeof value?.enabled === 'boolean' ? value.enabled : existing;
+  return { enabled, categories: merged };
+}
+
+export async function loadPrefs(uid = state.user?.uid) {
+  if (!uid) return defaultPrefs();
+  try {
+    const doc = await fb.getDoc(PATH, uid);
+    return normalisePrefs(doc, { existing: Boolean(doc) });
+  } catch {
+    return defaultPrefs();
+  }
+}
+
+export async function savePrefs(prefs, uid = state.user?.uid) {
+  if (!uid) return;
+  const clean = normalisePrefs(prefs);
+  await fb.setDoc(PATH, uid, {
+    uid,
+    enabled: clean.enabled,
+    categories: clean.categories,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Writes a privacy-safe activity envelope after a successful user action.
+ * Failures never roll back the post/photo/record that the person just saved.
+ */
+export async function recordActivity({
+  category = 'family', title = 'New family activity', body = '', url = '#/', sourceId = null, count = null,
+} = {}) {
+  const actorUid = state.user?.uid;
+  if (!actorUid || !CATEGORY_KEYS.has(category)) return null;
+
+  const cleanUrl = /^#\/[a-z0-9/_-]*$/i.test(String(url)) ? String(url) : '#/';
+  const activity = {
+    category,
+    actorUid,
+    actorName: String(state.member?.name ?? state.user?.displayName ?? 'Someone').slice(0, 120),
+    title: String(title || 'New family activity').slice(0, 80),
+    body: String(body || '').slice(0, 160),
+    url: cleanUrl,
+    createdAt: new Date().toISOString(),
+  };
+  if (sourceId) activity.sourceId = String(sourceId).slice(0, 160);
+  if (Number.isInteger(count) && count > 0) activity.count = Math.min(count, 10_000);
+
+  try {
+    return await fb.addDoc(ACTIVITY_PATH, activity);
+  } catch {
+    return null;
+  }
+}
+
+export async function showActivityNotification(activity) {
+  const { supported, permission } = capability();
+  if (!supported || permission !== 'granted') return false;
+
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    await registration.showNotification(activity.title || 'New family activity', {
+      body: activity.body || 'Something new was added to Family Dashboard.',
+      icon: './assets/icon-192.png',
+      badge: './assets/icon-192.png',
+      tag: activity.id ? `family-activity-${activity.id}` : `family-${activity.category ?? 'activity'}`,
+      data: { url: activity.url || '#/' },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function activitiesToNotify(events, seenIds, uid, prefs) {
+  if (!prefs?.enabled) return [];
+  const seen = seenIds instanceof Set ? seenIds : new Set(seenIds ?? []);
+  return (events ?? [])
+    .filter((activity) => !seen.has(activity.id))
+    .filter((activity) => activity.actorUid !== uid)
+    .filter((activity) => Boolean(prefs.categories?.[activity.category]))
+    .sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
+}
+
+let stopActivityWatch = null;
+
+/**
+ * Begins the one app-wide listener. The first Firestore snapshot is a baseline,
+ * never a reason to replay old alerts when someone opens the app.
+ */
+export function startActivityNotifications() {
+  if (stopActivityWatch || !state.user?.uid) return stopActivityWatch ?? (() => {});
+
+  // Safe no-op until a public VAPID key is present. Once closed-app delivery
+  // is configured, upgraded clients begin registering without another release.
+  void loadPrefs().then((prefs) => prefs.enabled && registerDevice());
+
+  let firstSnapshot = true;
+  let seen = new Set();
+
+  const unsubscribe = fb.watchDocs(
+    ACTIVITY_PATH,
+    { orderBy: ['createdAt', 'desc'], limit: 50 },
+    async (events) => {
+      const currentIds = new Set(events.map((event) => event.id));
+      if (firstSnapshot) {
+        firstSnapshot = false;
+        seen = currentIds;
+        return;
+      }
+
+      const previousSeen = seen;
+      seen = currentIds;
+      const prefs = await loadPrefs();
+      const fresh = activitiesToNotify(events, previousSeen, state.user?.uid, prefs);
+      if (!fresh.length) return;
+
+      for (const activity of fresh) {
+        await showActivityNotification(activity);
+      }
+    },
+  );
+
+  stopActivityWatch = () => {
+    unsubscribe?.();
+    stopActivityWatch = null;
+  };
+  return stopActivityWatch;
+}
+
+export function stopActivityNotifications() {
+  stopActivityWatch?.();
 }

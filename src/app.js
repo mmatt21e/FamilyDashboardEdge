@@ -21,6 +21,7 @@ import * as router from './router.js';
 import { diagnoseStartup, STARTUP_TIMEOUT_MS } from './diagnose.js';
 import { setAccountHint } from './drive.js';
 import { autoUpdate } from './update.js';
+import { startActivityNotifications, stopActivityNotifications } from './notifications.js';
 
 import { setupView, signInView } from './views/setup.js';
 import { settingsView } from './views/settings.js';
@@ -154,6 +155,7 @@ async function continueBoot(config) {
   fb.onAuthChange(async (user) => {
     if (!user) {
       disarmWatchdog();
+      stopActivityNotifications();
       update({ user: null, member: null });
       return screen(signInView({
         config,
@@ -315,6 +317,10 @@ function startApp() {
 
   if (!location.hash) router.navigate('/', { replace: true });
   else router.render();
+
+  // One listener for the whole app. It baselines existing activity, ignores
+  // this member's own actions, and applies their saved category choices.
+  startActivityNotifications();
 }
 
 /**

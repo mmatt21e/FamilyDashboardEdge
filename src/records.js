@@ -9,6 +9,8 @@
 
 import * as fb from './firebase.js';
 import { state } from './store.js';
+import { getModule } from './modules.js';
+import { recordActivity } from './notifications.js';
 
 export const RECORD_COLLECTIONS = Object.freeze({
   financialRecords: 'financial_records',
@@ -24,6 +26,25 @@ export const RECORD_COLLECTIONS = Object.freeze({
 });
 
 const ALLOWED_COLLECTIONS = new Set(Object.values(RECORD_COLLECTIONS));
+
+const CARE_ROUTES = Object.freeze({
+  medical_info: 'medical',
+  medications: 'medications',
+  medication_logs: 'medications',
+  appointments: 'appointments',
+  care_logs: 'carelog',
+  wellness_checks: 'wellness',
+});
+
+const MONEY_ROUTES = Object.freeze({
+  financial_records: 'records',
+  expenses: 'expenses',
+  budgets: 'budget',
+});
+
+const CALENDAR_MODULES = new Set(['birthdays', 'countdown', 'visitplanner', 'availability']);
+const CARE_MODULES = new Set(['checkin']);
+const MONEY_MODULES = new Set(['allowance']);
 
 function assertCollection(collection) {
   if (!ALLOWED_COLLECTIONS.has(collection)) {
@@ -128,13 +149,56 @@ export async function saveRecord(collection, id, data) {
     await fb.setDoc(collection, id, { ...data, ...audit });
     return id;
   }
-  return fb.addDoc(collection, {
+  const recordId = await fb.addDoc(collection, {
     ...data,
     createdAt: now,
     createdBy: state.user?.uid ?? null,
     createdByName: state.member?.name ?? 'Someone',
     ...audit,
   });
+  const activity = activityForRecord(collection, data, state.member?.name ?? 'Someone');
+  void recordActivity({ ...activity, sourceId: recordId });
+  return recordId;
+}
+
+/** Generic, lock-screen-safe activity copy for the record-based modules. */
+export function activityForRecord(collection, data = {}, actorName = 'Someone') {
+  if (CARE_ROUTES[collection]) {
+    return {
+      category: 'care', title: 'New care or wellness update',
+      body: `${actorName} added a care or wellness update.`,
+      url: `#/${CARE_ROUTES[collection]}`,
+    };
+  }
+  if (MONEY_ROUTES[collection]) {
+    return {
+      category: 'money', title: 'New money update',
+      body: `${actorName} added a money update.`,
+      url: `#/${MONEY_ROUTES[collection]}`,
+    };
+  }
+
+  const moduleKey = cleanText(data.moduleKey, 80) || 'family';
+  const module = getModule(moduleKey);
+  const category = moduleKey === 'comments'
+    ? 'feed'
+    : CALENDAR_MODULES.has(moduleKey)
+      ? 'calendar'
+      : CARE_MODULES.has(moduleKey)
+        ? 'care'
+        : MONEY_MODULES.has(moduleKey)
+          ? 'money'
+          : 'family';
+  const route = moduleKey === 'comments' ? 'feed' : moduleKey;
+  const label = module?.title ?? 'family activity';
+  return {
+    category,
+    title: moduleKey === 'comments' ? 'New reply' : `New ${label.toLowerCase()} update`,
+    body: moduleKey === 'comments'
+      ? `${actorName} replied to a family post.`
+      : `${actorName} added something to ${label}.`,
+    url: `#/${route}`,
+  };
 }
 
 export async function removeRecord(collection, id) {
